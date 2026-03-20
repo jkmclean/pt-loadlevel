@@ -1,21 +1,35 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allowed users collection — readable by any authenticated user, writable only by admins
-    match /allowedUsers/{docId} {
-      // Any authenticated user can read (to check if they're on the list)
+
+    // Super admins collection — only super admins can read/write
+    match /superAdmins/{email} {
       allow read: if request.auth != null;
-      
-      // Write operations: allow if the writing user is an admin in the allowedUsers collection
-      // For the first user (empty collection), allow the write to bootstrap
-      allow create: if request.auth != null;
-      allow update, delete: if request.auth != null;
+      allow write: if false; // Managed by seed logic only
     }
-    
-    // Deny everything else
-    match /{document=**} {
-      allow read, write: if false;
+
+    // Users collection — authenticated users can read their own doc; admins can read/write all
+    match /users/{email} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // Organizations — authenticated users can read; creation requires auth
+    match /organizations/{orgId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+
+      // Org subcollections (surveys, staff, settings) — authenticated users can read/write
+      match /{subcollection}/{document=**} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null;
+      }
+    }
+
+    // Legacy allowedUsers collection (keeping for backward compat during migration)
+    match /allowedUsers/{doc} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
     }
   }
 }

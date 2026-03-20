@@ -1378,3 +1378,24 @@ select.form-control {
     background: rgba(139, 146, 168, 0.15);
     color: #8b92a8;
 }
+
+.role-badge.role-superadmin {
+    background: linear-gradient(135deg, #f39c12, #e67e22);
+    color: white;
+}
+
+/* ===== Org Picker ===== */
+.org-picker {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.org-select {
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+}

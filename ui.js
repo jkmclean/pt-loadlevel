@@ -45,6 +45,10 @@ function initNavigation() {
 }
 
 function refreshCurrentPanel(panel) {
+    if (!panel) {
+        const active = document.querySelector('.nav-item.active');
+        panel = active ? active.dataset.panel : 'dashboard';
+    }
     switch (panel) {
         case 'dashboard': renderDashboard(); break;
         case 'staff': renderStaffTable(); break;
@@ -139,18 +143,22 @@ function renderStaffTable() {
 function openStaffModal(id) {
     const staff = id ? Store.staff.find(s => s.id === id) : null;
     const html = `<div class="form-group"><label for="staff-name">Name</label><input type="text" class="form-control" id="staff-name" value="${staff ? staff.name : ''}" placeholder="e.g. Jane Smith"></div><div class="form-group"><label for="staff-role">Role</label><select class="form-control" id="staff-role"><option value="Junior Coordinator" ${staff?.role === 'Junior Coordinator' ? 'selected' : ''}>Junior Coordinator</option><option value="Coordinator" ${staff?.role === 'Coordinator' ? 'selected' : ''}>Coordinator</option><option value="Senior Coordinator" ${!staff || staff?.role === 'Senior Coordinator' ? 'selected' : ''}>Senior Coordinator</option><option value="Manager" ${staff?.role === 'Manager' ? 'selected' : ''}>Manager</option></select></div>`;
-    Modal.open(id ? 'Edit Staff Member' : 'Add Staff Member', html, () => {
+    Modal.open(id ? 'Edit Staff Member' : 'Add Staff Member', html, async () => {
         const name = document.getElementById('staff-name').value.trim();
         const role = document.getElementById('staff-role').value;
         if (!name) { showToast('Name is required', 'error'); return; }
-        if (id) Store.updateStaff(id, { name, role }); else Store.addStaff({ name, role });
-        Modal.close(); renderStaffTable(); showToast(id ? 'Staff updated' : 'Staff added', 'success');
+        try {
+            if (id) await Store.updateStaff(id, { name, role }); else await Store.addStaff({ name, role });
+            Modal.close(); showToast(id ? 'Staff updated' : 'Staff added', 'success');
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
     });
 }
 
-function deleteStaff(id) {
+async function deleteStaff(id) {
     const s = Store.staff.find(x => x.id === id);
-    if (confirm(`Remove ${s.name}? Their survey assignments will be unassigned.`)) { Store.removeStaff(id); renderStaffTable(); showToast('Staff removed', 'info'); }
+    if (confirm(`Remove ${s.name}? Their survey assignments will be unassigned.`)) {
+        try { await Store.removeStaff(id); showToast('Staff removed', 'info'); } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    }
 }
 
 // ===== Surveys Panel =====
@@ -159,7 +167,7 @@ function renderSurveysTable() {
     const empty = document.getElementById('surveys-empty');
     if (Store.surveys.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
     empty.style.display = 'none';
-    const role = AllowList._currentRole;
+    const role = Auth._currentRole;
     tbody.innerHTML = Store.surveys.map(s => {
         const score = Math.round(Scoring.surveyScore(s));
         const assignedTo = Store.staff.find(st => st.id === Store.assignments[s.id]);
@@ -219,17 +227,21 @@ function gatherSurveyForm() {
 
 function openSurveyModal(id) {
     const survey = id ? Store.surveys.find(s => s.id === id) : null;
-    Modal.open(id ? 'Edit Survey' : 'Add Survey', surveyFormHTML(survey), () => {
+    Modal.open(id ? 'Edit Survey' : 'Add Survey', surveyFormHTML(survey), async () => {
         const data = gatherSurveyForm();
         if (!data.name) { showToast('Survey name is required', 'error'); return; }
-        if (id) Store.updateSurvey(id, data); else Store.addSurvey(data);
-        Modal.close(); renderSurveysTable(); showToast(id ? 'Survey updated' : 'Survey added', 'success');
+        try {
+            if (id) await Store.updateSurvey(id, data); else await Store.addSurvey(data);
+            Modal.close(); showToast(id ? 'Survey updated' : 'Survey added', 'success');
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
     });
 }
 
-function deleteSurvey(id) {
+async function deleteSurvey(id) {
     const s = Store.surveys.find(x => x.id === id);
-    if (confirm(`Delete survey "${s.name}"?`)) { Store.removeSurvey(id); renderSurveysTable(); showToast('Survey deleted', 'info'); }
+    if (confirm(`Delete survey "${s.name}"?`)) {
+        try { await Store.removeSurvey(id); showToast('Survey deleted', 'info'); } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    }
 }
 
 // ===== Assignments Panel =====
@@ -238,7 +250,7 @@ function renderAssignments() {
     const empty = document.getElementById('assignments-empty');
     if (Store.surveys.length === 0) { tbody.innerHTML = ''; empty.style.display = ''; return; }
     empty.style.display = 'none';
-    const canAssign = Roles.canChangeAssignments(AllowList._currentRole);
+    const canAssign = Roles.canChangeAssignments(Auth._currentRole);
     tbody.innerHTML = Store.surveys.map(sv => {
         const score = Math.round(Scoring.surveyScore(sv));
         const currentStaff = Store.assignments[sv.id] || '';
@@ -252,10 +264,12 @@ function renderAssignments() {
     renderWorkloadPreview();
 }
 
-function assignSurvey(surveyId, staffId) {
-    Store.assign(surveyId, staffId || null);
-    renderWorkloadPreview();
-    showToast('Assignment updated', 'success');
+async function assignSurvey(surveyId, staffId) {
+    try {
+        await Store.assign(surveyId, staffId || null);
+        renderWorkloadPreview();
+        showToast('Assignment updated', 'success');
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 function renderWorkloadPreview() {
@@ -404,9 +418,9 @@ function previewWhatIf() {
     document.getElementById('btn-whatif-apply').style.display = '';
 }
 
-function applyWhatIf() {
+async function applyWhatIf() {
     const reassignments = gatherWhatIfReassignments();
-    reassignments.forEach(r => { Store.assign(r.surveyId, r.toId); });
+    for (const r of reassignments) { await Store.assign(r.surveyId, r.toId); }
     showToast(`${reassignments.length} reassignment${reassignments.length > 1 ? 's' : ''} applied!`, 'success');
     document.getElementById('what-if-panel').style.display = 'none';
     renderDashboard();
@@ -420,24 +434,90 @@ function renderSettings() {
         document.getElementById(`weight-val-${cat}`).textContent = w[cat] + '%';
     });
     updateWeightTotal();
+    renderOrgManagement();
     renderUserManagement();
 }
 
-function renderUserManagement() {
-    const card = document.getElementById('user-management-card');
-    if (!AllowList._isAdmin) { card.style.display = 'none'; return; }
+// ===== Org Picker (Sidebar) =====
+async function renderOrgPicker() {
+    const picker = document.getElementById('org-picker');
+    const select = document.getElementById('org-select');
+    const allOrgs = await FirestoreStore.listOrgs();
+    const userOrgs = UserManager.getUserOrgs();
+    const availableOrgs = UserManager._isSuperAdmin
+        ? allOrgs
+        : allOrgs.filter(o => userOrgs.some(uo => uo.orgId === o.id));
+
+    if (availableOrgs.length <= 1 && !UserManager._isSuperAdmin) {
+        picker.style.display = 'none';
+        return;
+    }
+
+    picker.style.display = '';
+    select.innerHTML = availableOrgs.map(o =>
+        `<option value="${o.id}" ${o.id === Auth._currentOrgId ? 'selected' : ''}>${o.name}</option>`
+    ).join('');
+
+    select.onchange = () => Auth.switchOrg(select.value);
+}
+
+// ===== Org Management (Super Admin) =====
+async function renderOrgManagement() {
+    const card = document.getElementById('org-management-card');
+    if (!UserManager._isSuperAdmin) { card.style.display = 'none'; return; }
     card.style.display = '';
+    const orgs = await FirestoreStore.listOrgs();
+    const tbody = document.getElementById('org-table-body');
+    tbody.innerHTML = orgs.map(o => {
+        const created = o.createdAt ? new Date(o.createdAt.seconds * 1000).toLocaleDateString() : '—';
+        const isCurrent = o.id === Auth._currentOrgId;
+        const badge = isCurrent ? ' <span style="color:var(--accent-primary);font-size:0.75rem;">● Active</span>' : '';
+        return `<tr><td><strong>${o.name}</strong>${badge}</td><td style="color:var(--text-muted)">${created}</td><td><button class="btn-action danger" onclick="deleteOrg('${o.id}', '${o.name}')" title="Delete">🗑️</button></td></tr>`;
+    }).join('');
+
+    document.getElementById('btn-add-org').onclick = async () => {
+        const nameInput = document.getElementById('add-org-name');
+        const name = nameInput.value.trim();
+        if (!name) { showToast('Organization name is required', 'error'); return; }
+        try {
+            const orgId = await FirestoreStore.createOrg(name, Auth.currentUser.email);
+            await UserManager.setRoleForOrg(Auth.currentUser.email, orgId, 'admin');
+            nameInput.value = '';
+            renderOrgManagement();
+            renderOrgPicker();
+            showToast(`Organization "${name}" created`, 'success');
+        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    };
+}
+
+async function deleteOrg(orgId, name) {
+    if (!confirm(`Delete organization "${name}" and ALL its data? This cannot be undone.`)) return;
+    try {
+        await FirestoreStore.deleteOrg(orgId);
+        renderOrgManagement();
+        renderOrgPicker();
+        showToast(`Organization "${name}" deleted`, 'info');
+    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+}
+
+// ===== User Management (Per-Org) =====
+async function renderUserManagement() {
+    const card = document.getElementById('user-management-card');
+    const canManage = Roles.canManageUsers(Auth._currentRole) || UserManager._isSuperAdmin;
+    if (!canManage) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    const orgId = Auth._currentOrgId;
+    if (!orgId) return;
+    const users = await UserManager.listOrgUsers(orgId);
     const tbody = document.getElementById('user-table-body');
     const currentEmail = Auth.currentUser?.email?.toLowerCase();
-    tbody.innerHTML = AllowList._cache.map(u => {
+    tbody.innerHTML = users.map(u => {
         const isSelf = u.email.toLowerCase() === currentEmail;
         const roleColors = { admin: 'var(--accent-primary)', editor: '#2ecc71', viewer: 'var(--text-muted)' };
         const roleLabel = `<span style="color:${roleColors[u.role] || roleColors.viewer};font-weight:600;">${Roles.LABELS[u.role] || 'Viewer'}</span>`;
-        const added = u.addedAt ? new Date(u.addedAt).toLocaleDateString() : '—';
-        // Role change dropdown (can't change own role)
-        const roleSelect = isSelf ? roleLabel : `<select class="form-control" style="min-width:100px;padding:4px 8px;font-size:0.82rem;" onchange="changeUserRole('${u.id}', this.value)"><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="viewer" ${u.role==='viewer'||!u.role?'selected':''}>Viewer</option></select>`;
-        const removeBtn = isSelf ? '<span style="color:var(--text-muted);font-size:0.8rem;">You</span>' : `<button class="btn-action danger" onclick="removeAuthorizedUser('${u.id}', '${u.email}')" title="Remove">🗑️</button>`;
-        return `<tr><td>${u.email}</td><td>${roleSelect}</td><td style="color:var(--text-muted)">${added}</td><td>${removeBtn}</td></tr>`;
+        const roleSelect = isSelf ? roleLabel : `<select class="form-control" style="min-width:100px;padding:4px 8px;font-size:0.82rem;" onchange="changeUserRole('${u.email}', this.value)"><option value="admin" ${u.role==='admin'?'selected':''}>Admin</option><option value="editor" ${u.role==='editor'?'selected':''}>Editor</option><option value="viewer" ${u.role==='viewer'||!u.role?'selected':''}>Viewer</option></select>`;
+        const removeBtn = isSelf ? '<span style="color:var(--text-muted);font-size:0.8rem;">You</span>' : `<button class="btn-action danger" onclick="removeAuthorizedUser('${u.email}')" title="Remove">🗑️</button>`;
+        return `<tr><td>${u.email}</td><td>${roleSelect}</td><td>${removeBtn}</td></tr>`;
     }).join('');
 }
 
@@ -449,20 +529,21 @@ async function addAuthorizedUser() {
     if (!email) { showToast('Enter an email address', 'error'); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Invalid email format', 'error'); return; }
     try {
-        await AllowList.addUser(email, role);
+        await UserManager.ensureUserDoc(email);
+        await UserManager.setRoleForOrg(email, Auth._currentOrgId, role);
         emailInput.value = '';
-        roleSelect.value = 'user';
+        roleSelect.value = 'viewer';
         renderUserManagement();
-        showToast(`${email} added as ${role}`, 'success');
+        showToast(`${email} added as ${Roles.LABELS[role]}`, 'success');
     } catch (err) {
         showToast(err.message, 'error');
     }
 }
 
-async function removeAuthorizedUser(docId, email) {
-    if (!confirm(`Remove ${email} from authorized users?`)) return;
+async function removeAuthorizedUser(email) {
+    if (!confirm(`Remove ${email} from this organization?`)) return;
     try {
-        await AllowList.removeUser(docId);
+        await UserManager.removeUserFromOrg(email, Auth._currentOrgId);
         renderUserManagement();
         showToast(`${email} removed`, 'info');
     } catch (err) {
@@ -470,14 +551,24 @@ async function removeAuthorizedUser(docId, email) {
     }
 }
 
+async function changeUserRole(email, newRole) {
+    try {
+        await UserManager.setRoleForOrg(email, Auth._currentOrgId, newRole);
+        renderUserManagement();
+        showToast(`Role updated to ${Roles.LABELS[newRole]}`, 'success');
+    } catch (err) {
+        showToast('Failed to update role: ' + err.message, 'error');
+    }
+}
+
 function initSettings() {
     document.querySelectorAll('.weight-slider').forEach(slider => {
-        slider.addEventListener('input', () => {
+        slider.addEventListener('input', async () => {
             const cat = slider.dataset.category;
             document.getElementById(`weight-val-${cat}`).textContent = slider.value + '%';
             const w = {};
             CATEGORIES.forEach(c => { w[c] = parseInt(document.getElementById(`weight-${c}`).value); });
-            Store.setWeights(w);
+            await Store.setWeights(w);
             updateWeightTotal();
         });
     });
@@ -490,11 +581,11 @@ function initSettings() {
     document.getElementById('import-file-input').onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
-        reader.onload = (ev) => { try { Store.importJSON(ev.target.result); showToast('Data imported', 'success'); renderDashboard(); } catch (err) { showToast('Invalid JSON', 'error'); } };
+        reader.onload = async (ev) => { try { await Store.importJSON(ev.target.result); showToast('Data imported', 'success'); renderDashboard(); } catch (err) { showToast('Invalid JSON', 'error'); } };
         reader.readAsText(file);
     };
-    document.getElementById('btn-clear-data').onclick = () => { if (confirm('Clear ALL data?')) { Store.clearAll(); showToast('Data cleared', 'info'); refreshCurrentPanel('settings'); } };
-    document.getElementById('btn-load-sample').onclick = () => { if (confirm('Load sample data? Replaces current data.')) { Store.loadSampleData(); showToast('Sample data loaded', 'success'); renderSettings(); } };
+    document.getElementById('btn-clear-data').onclick = async () => { if (confirm('Clear ALL data in this organization?')) { await Store.clearAll(); showToast('Data cleared', 'info'); } };
+    document.getElementById('btn-load-sample').onclick = async () => { if (confirm('Load sample data? Replaces current data.')) { await Store.loadSampleData(); showToast('Sample data loaded', 'success'); } };
     document.getElementById('btn-add-user').onclick = addAuthorizedUser;
     document.getElementById('add-user-email').addEventListener('keydown', (e) => { if (e.key === 'Enter') addAuthorizedUser(); });
 }
@@ -508,38 +599,21 @@ function updateWeightTotal() {
 
 // ===== Role-Based UI Gating =====
 function applyRoleRestrictions() {
-    const role = AllowList._currentRole;
+    const role = Auth._currentRole;
 
-    // Hide Add buttons for viewers
-    if (!Roles.canCreateStaff(role)) {
-        document.getElementById('btn-add-staff').style.display = 'none';
-    }
-    if (!Roles.canCreateSurvey(role)) {
-        document.getElementById('btn-add-survey').style.display = 'none';
-    }
+    // Show/hide Add buttons
+    document.getElementById('btn-add-staff').style.display = Roles.canCreateStaff(role) ? '' : 'none';
+    document.getElementById('btn-add-survey').style.display = Roles.canCreateSurvey(role) ? '' : 'none';
 
     // Settings restrictions
-    if (!Roles.canEditSettings(role)) {
-        document.querySelectorAll('.weight-slider').forEach(s => { s.disabled = true; s.style.opacity = '0.5'; });
-    }
-    if (!Roles.canExportImportData(role)) {
-        document.getElementById('btn-export-data').style.display = 'none';
-        document.getElementById('btn-import-data').style.display = 'none';
-    }
-    if (!Roles.canClearData(role)) {
-        document.getElementById('btn-clear-data').style.display = 'none';
-        document.getElementById('btn-load-sample').style.display = 'none';
-    }
-}
-
-async function changeUserRole(docId, newRole) {
-    try {
-        await AllowList.updateUserRole(docId, newRole);
-        renderUserManagement();
-        showToast(`Role updated to ${Roles.LABELS[newRole]}`, 'success');
-    } catch (err) {
-        showToast('Failed to update role: ' + err.message, 'error');
-    }
+    document.querySelectorAll('.weight-slider').forEach(s => {
+        s.disabled = !Roles.canEditSettings(role);
+        s.style.opacity = Roles.canEditSettings(role) ? '' : '0.5';
+    });
+    document.getElementById('btn-export-data').style.display = Roles.canExportImportData(role) ? '' : 'none';
+    document.getElementById('btn-import-data').style.display = Roles.canExportImportData(role) ? '' : 'none';
+    document.getElementById('btn-clear-data').style.display = Roles.canClearData(role) ? '' : 'none';
+    document.getElementById('btn-load-sample').style.display = Roles.canClearData(role) ? '' : 'none';
 }
 
 // ===== Init =====

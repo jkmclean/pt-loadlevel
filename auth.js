@@ -35,75 +35,15 @@ const Roles = {
     canEditSettings(role) { return role === 'admin' || role === 'editor'; },
     canExportImportData(role) { return role === 'admin' || role === 'editor'; },
     canClearData(role) { return role === 'admin'; },
-};
-
-// ===== Firestore-backed Allowlist =====
-const AllowList = {
-    _cache: null,
-    _isAdmin: false,
-    _currentRole: 'viewer',
-
-    async load() {
-        try {
-            const snap = await db.collection('allowedUsers').get();
-            this._cache = [];
-            snap.forEach(doc => {
-                this._cache.push({ id: doc.id, ...doc.data() });
-            });
-        } catch (err) {
-            console.warn('Could not load allowlist from Firestore:', err);
-            this._cache = [];
-        }
-        return this._cache;
-    },
-
-    isAllowed(email) {
-        if (!email || !this._cache) return false;
-        const lower = email.toLowerCase();
-        return this._cache.some(u => u.email.toLowerCase() === lower);
-    },
-
-    getRole(email) {
-        if (!email || !this._cache) return 'viewer';
-        const lower = email.toLowerCase();
-        const user = this._cache.find(u => u.email.toLowerCase() === lower);
-        return user ? (user.role || 'viewer') : 'viewer';
-    },
-
-    isAdmin(email) { return this.getRole(email) === 'admin'; },
-
-    async addUser(email, role = 'viewer') {
-        const lower = email.toLowerCase().trim();
-        if (!lower) throw new Error('Email is required');
-        const existing = this._cache.find(u => u.email.toLowerCase() === lower);
-        if (existing) throw new Error('User already exists');
-        const docRef = await db.collection('allowedUsers').add({ email: lower, role, addedAt: new Date().toISOString() });
-        this._cache.push({ id: docRef.id, email: lower, role, addedAt: new Date().toISOString() });
-    },
-
-    async updateUserRole(docId, newRole) {
-        await db.collection('allowedUsers').doc(docId).update({ role: newRole });
-        const user = this._cache.find(u => u.id === docId);
-        if (user) user.role = newRole;
-    },
-
-    async removeUser(docId) {
-        await db.collection('allowedUsers').doc(docId).delete();
-        this._cache = this._cache.filter(u => u.id !== docId);
-    },
-
-    async seedAdmin(email) {
-        if (this._cache && this._cache.length === 0) {
-            await this.addUser(email, 'admin');
-            console.log('Seeded admin:', email);
-        }
-    }
+    canManageOrgs() { return UserManager._isSuperAdmin; },
 };
 
 // ===== Auth UI Logic =====
 const Auth = {
     currentUser: null,
     _isSignUpMode: false,
+    _currentOrgId: null,
+    _currentRole: 'viewer',
 
     init() {
         const loginGate = document.getElementById('login-gate');
@@ -133,14 +73,8 @@ const Auth = {
             const password = passwordInput.value;
             loginError.style.display = 'none';
 
-            if (!email || !password) {
-                this._showError(loginError, 'Please enter email and password');
-                return;
-            }
-            if (password.length < 6) {
-                this._showError(loginError, 'Password must be at least 6 characters');
-                return;
-            }
+            if (!email || !password) { this._showError(loginError, 'Please enter email and password'); return; }
+            if (password.length < 6) { this._showError(loginError, 'Password must be at least 6 characters'); return; }
 
             emailSigninBtn.disabled = true;
             emailSigninBtn.textContent = this._isSignUpMode ? 'Creating...' : 'Signing in...';
@@ -151,31 +85,21 @@ const Auth = {
                 } else {
                     await auth.signInWithEmailAndPassword(email, password);
                 }
-                // onAuthStateChanged will handle the rest
             } catch (err) {
-                const msg = this._friendlyError(err.code);
-                this._showError(loginError, msg);
+                this._showError(loginError, this._friendlyError(err.code));
                 emailSigninBtn.disabled = false;
                 emailSigninBtn.textContent = this._isSignUpMode ? 'Create Account' : 'Sign In';
             }
         });
 
-        // Enter key submits the form
-        passwordInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') emailSigninBtn.click();
-        });
-        emailInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') passwordInput.focus();
-        });
+        passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') emailSigninBtn.click(); });
+        emailInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') passwordInput.focus(); });
 
         // Forgot Password
         forgotBtn.addEventListener('click', async (e) => {
             e.preventDefault();
             const email = emailInput.value.trim();
-            if (!email) {
-                this._showError(loginError, 'Enter your email above first');
-                return;
-            }
+            if (!email) { this._showError(loginError, 'Enter your email above first'); return; }
             try {
                 await auth.sendPasswordResetEmail(email);
                 loginError.style.display = '';
@@ -202,7 +126,6 @@ const Auth = {
             }
         });
 
-        // Sign out from denied screen
         signoutDenied.addEventListener('click', async () => {
             await auth.signOut();
             deniedDiv.style.display = 'none';
@@ -211,7 +134,6 @@ const Auth = {
             signinBtn.style.display = '';
         });
 
-        // Sign out from sidebar
         signoutBtn.addEventListener('click', async () => {
             await auth.signOut();
             location.reload();
@@ -220,57 +142,133 @@ const Auth = {
         // Auth state observer
         auth.onAuthStateChanged(async (user) => {
             if (user) {
-                await AllowList.load();
-
-                if (AllowList._cache.length === 0) {
-                    await AllowList.seedAdmin(user.email);
-                }
-
-                if (AllowList.isAllowed(user.email)) {
-                    this.currentUser = user;
-                    AllowList._currentRole = AllowList.getRole(user.email);
-                    AllowList._isAdmin = AllowList._currentRole === 'admin';
-                    loginGate.classList.add('hidden');
-                    this.showUserInfo(user);
-
-                    if (!window._appInitialized) {
-                        window._appInitialized = true;
-                        Store.load();
-                        Modal.init();
-                        initNavigation();
-                        initWhatIf();
-                        initSettings();
-                        applyRoleRestrictions();
-                        document.getElementById('btn-add-staff').onclick = () => openStaffModal(null);
-                        document.getElementById('btn-add-survey').onclick = () => openSurveyModal(null);
-                        renderDashboard();
-                    }
-                } else {
-                    // Not on allowlist
-                    document.getElementById('email-auth-form').style.display = 'none';
-                    document.querySelector('.auth-divider').style.display = 'none';
-                    signinBtn.style.display = 'none';
-                    deniedDiv.style.display = '';
-                    loginGate.classList.remove('hidden');
-                }
+                await this._handleSignIn(user, loginGate, signinBtn, deniedDiv);
             } else {
                 this.currentUser = null;
+                this._currentOrgId = null;
                 loginGate.classList.remove('hidden');
                 document.getElementById('email-auth-form').style.display = '';
                 document.querySelector('.auth-divider').style.display = '';
                 signinBtn.style.display = '';
                 signinBtn.disabled = false;
-                deniedDiv.style.display = 'none';
+                document.getElementById('login-denied').style.display = 'none';
                 document.getElementById('sidebar-user').style.display = 'none';
             }
         });
     },
 
+    async _handleSignIn(user, loginGate, signinBtn, deniedDiv) {
+        const email = user.email.toLowerCase();
+
+        // Seed super admin if first user ever
+        await UserManager.seedSuperAdmin(email);
+
+        // Load user profile
+        await UserManager.loadUser(email);
+        await UserManager.ensureUserDoc(email);
+
+        // Super admins always get in
+        if (UserManager._isSuperAdmin) {
+            this.currentUser = user;
+            loginGate.classList.add('hidden');
+            this.showUserInfo(user);
+            await this._initApp();
+            return;
+        }
+
+        // Regular users need to belong to at least one org
+        const userOrgs = UserManager.getUserOrgs();
+        if (userOrgs.length > 0) {
+            this.currentUser = user;
+            loginGate.classList.add('hidden');
+            this.showUserInfo(user);
+            await this._initApp();
+        } else {
+            // Not assigned to any org
+            document.getElementById('email-auth-form').style.display = 'none';
+            document.querySelector('.auth-divider').style.display = 'none';
+            signinBtn.style.display = 'none';
+            deniedDiv.style.display = '';
+            loginGate.classList.remove('hidden');
+        }
+    },
+
+    async _initApp() {
+        if (window._appInitialized) return;
+        window._appInitialized = true;
+
+        // Determine which org to load
+        const userOrgs = UserManager.getUserOrgs();
+        const allOrgs = await FirestoreStore.listOrgs();
+
+        // Super admin can see all orgs
+        const availableOrgs = UserManager._isSuperAdmin
+            ? allOrgs
+            : allOrgs.filter(o => userOrgs.some(uo => uo.orgId === o.id));
+
+        if (availableOrgs.length === 0 && UserManager._isSuperAdmin) {
+            // First time — create default org
+            const orgId = await FirestoreStore.createOrg('IQMH', this.currentUser.email);
+            await UserManager.setRoleForOrg(this.currentUser.email, orgId, 'admin');
+            await UserManager.loadUser(this.currentUser.email); // refresh
+            this._currentOrgId = orgId;
+        } else if (availableOrgs.length > 0) {
+            // Use last-used org or first available
+            const lastOrg = localStorage.getItem('pt-lastOrg');
+            const match = availableOrgs.find(o => o.id === lastOrg);
+            this._currentOrgId = match ? match.id : availableOrgs[0].id;
+        }
+
+        // Set role for current org
+        this._currentRole = UserManager.getRoleForOrg(this._currentOrgId);
+
+        // Load org data with real-time updates
+        await FirestoreStore.loadOrg(this._currentOrgId, (changeType) => {
+            // Real-time callback — re-render affected panels
+            if (typeof refreshCurrentPanel === 'function') {
+                refreshCurrentPanel();
+            }
+        });
+
+        // Save last-used org
+        localStorage.setItem('pt-lastOrg', this._currentOrgId);
+
+        // Init UI
+        Modal.init();
+        initNavigation();
+        initWhatIf();
+        initSettings();
+        applyRoleRestrictions();
+        renderOrgPicker();
+        document.getElementById('btn-add-staff').onclick = () => openStaffModal(null);
+        document.getElementById('btn-add-survey').onclick = () => openSurveyModal(null);
+        renderDashboard();
+    },
+
+    async switchOrg(orgId) {
+        this._currentOrgId = orgId;
+        this._currentRole = UserManager.getRoleForOrg(orgId);
+        localStorage.setItem('pt-lastOrg', orgId);
+
+        await FirestoreStore.loadOrg(orgId, (changeType) => {
+            if (typeof refreshCurrentPanel === 'function') {
+                refreshCurrentPanel();
+            }
+        });
+
+        applyRoleRestrictions();
+        renderOrgPicker();
+        this.showUserInfo(this.currentUser);
+        renderDashboard();
+        showToast(`Switched to ${(await FirestoreStore.listOrgs()).find(o => o.id === orgId)?.name || orgId}`, 'info');
+    },
+
     showUserInfo(user) {
         document.getElementById('sidebar-user').style.display = '';
         document.getElementById('user-avatar').src = user.photoURL || '';
-        const roleBadge = `<span class="role-badge role-${AllowList._currentRole}">${Roles.LABELS[AllowList._currentRole]}</span>`;
-        const authMethod = user.providerData[0]?.providerId === 'password' ? '📧' : '';
+        const roleLabel = UserManager._isSuperAdmin ? 'Super Admin' : Roles.LABELS[this._currentRole] || 'Viewer';
+        const roleClass = UserManager._isSuperAdmin ? 'role-superadmin' : `role-${this._currentRole}`;
+        const roleBadge = `<span class="role-badge ${roleClass}">${roleLabel}</span>`;
         document.getElementById('user-name').innerHTML = (user.displayName || user.email) + ' ' + roleBadge;
     },
 

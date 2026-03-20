@@ -70,6 +70,10 @@
             <span class="user-name" id="user-name"></span>
             <button class="btn-signout" id="btn-signout" title="Sign out">↩</button>
         </div>
+        <!-- Org Picker -->
+        <div class="org-picker" id="org-picker" style="display:none;">
+            <select class="form-control org-select" id="org-select" title="Switch organization"></select>
+        </div>
         <nav class="sidebar-nav">
             <button class="nav-item active" data-panel="dashboard" id="nav-dashboard">
                 <span class="nav-icon">📊</span>
@@ -363,11 +367,33 @@
                     </div>
                 </div>
 
-                <!-- User Management (Admin Only) -->
+                <!-- Org Management (Super Admin Only) -->
+                <div class="card" id="org-management-card" style="display:none;">
+                    <div class="card-header">
+                        <h2>🏢 Organizations</h2>
+                        <p class="card-subtitle">Create and manage PT organizations. Only Super Admins can manage organizations.</p>
+                    </div>
+                    <div class="user-mgmt-add">
+                        <input type="text" class="form-control" id="add-org-name" placeholder="Organization name">
+                        <button class="btn btn-primary" id="btn-add-org">+ Create Org</button>
+                    </div>
+                    <table class="data-table" id="org-table">
+                        <thead>
+                            <tr>
+                                <th>Organization</th>
+                                <th>Created</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="org-table-body"></tbody>
+                    </table>
+                </div>
+
+                <!-- User Management (Org Admin+) -->
                 <div class="card" id="user-management-card" style="display:none;">
                     <div class="card-header">
-                        <h2>🔐 Authorized Users</h2>
-                        <p class="card-subtitle">Manage who can access the dashboard. Only admins can add or remove users.</p>
+                        <h2>🔐 Organization Users</h2>
+                        <p class="card-subtitle">Manage who can access the current organization.</p>
                     </div>
                     <div class="user-mgmt-add">
                         <input type="email" class="form-control" id="add-user-email" placeholder="user@example.com">
@@ -383,7 +409,6 @@
                             <tr>
                                 <th>Email</th>
                                 <th>Role</th>
-                                <th>Added</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -413,6 +438,7 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
 
+    <script src="db.js"></script>
     <script src="auth.js"></script>
     <script src="app.js"></script>
     <script src="ui.js"></script>

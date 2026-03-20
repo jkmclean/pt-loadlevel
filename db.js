@@ -1,0 +1,449 @@
+// ===== Firestore Data Layer =====
+// Organization-scoped CRUD with real-time listeners
+
+const FirestoreStore = {
+    _orgId: null,
+    _listeners: [],  // active onSnapshot unsubscribers
+    _cache: { surveys: [], staff: [], assignments: {}, weights: {} },
+    _onUpdate: null, // callback for real-time updates
+
+    get orgId() { return this._orgId; },
+    get surveys() { return this._cache.surveys; },
+    get staff() { return this._cache.staff; },
+    get assignments() { return this._cache.assignments; },
+    get weights() { return this._cache.weights; },
+
+    defaultWeights() {
+        return { analyteVolume: 25, participantLoad: 20, gradingComplexity: 20, materialShipping: 15, regulatoryReporting: 12, committeeWork: 8 };
+    },
+
+    // ===== Organization Management =====
+
+    async createOrg(name, adminEmail) {
+        const docRef = await db.collection('organizations').add({
+            name,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            createdBy: adminEmail
+        });
+        // Set default weights
+        await db.collection('organizations').doc(docRef.id)
+            .collection('settings').doc('weights')
+            .set(this.defaultWeights());
+        return docRef.id;
+    },
+
+    async listOrgs() {
+        const snap = await db.collection('organizations').get();
+        const orgs = [];
+        snap.forEach(doc => orgs.push({ id: doc.id, ...doc.data() }));
+        return orgs;
+    },
+
+    async renameOrg(orgId, newName) {
+        await db.collection('organizations').doc(orgId).update({ name: newName });
+    },
+
+    async deleteOrg(orgId) {
+        // Delete subcollections first
+        const collections = ['surveys', 'staff', 'assignments'];
+        for (const col of collections) {
+            const snap = await db.collection('organizations').doc(orgId).collection(col).get();
+            const batch = db.batch();
+            snap.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
+        }
+        // Delete settings
+        await db.collection('organizations').doc(orgId).collection('settings').doc('weights').delete().catch(() => {});
+        // Delete org doc
+        await db.collection('organizations').doc(orgId).delete();
+    },
+
+    // ===== Load Organization (with real-time listeners) =====
+
+    async loadOrg(orgId, onUpdate) {
+        // Unsubscribe from previous listeners
+        this.unsubscribe();
+        this._orgId = orgId;
+        this._onUpdate = onUpdate;
+        this._cache = { surveys: [], staff: [], assignments: {}, weights: this.defaultWeights() };
+
+        const orgRef = db.collection('organizations').doc(orgId);
+
+        // Real-time: Surveys
+        this._listeners.push(
+            orgRef.collection('surveys').onSnapshot(snap => {
+                this._cache.surveys = [];
+                snap.forEach(doc => this._cache.surveys.push({ id: doc.id, ...doc.data() }));
+                if (this._onUpdate) this._onUpdate('surveys');
+            })
+        );
+
+        // Real-time: Staff
+        this._listeners.push(
+            orgRef.collection('staff').onSnapshot(snap => {
+                this._cache.staff = [];
+                snap.forEach(doc => this._cache.staff.push({ id: doc.id, ...doc.data() }));
+                if (this._onUpdate) this._onUpdate('staff');
+            })
+        );
+
+        // Real-time: Assignments (single doc with all mappings)
+        this._listeners.push(
+            orgRef.collection('settings').doc('assignments').onSnapshot(doc => {
+                this._cache.assignments = doc.exists ? doc.data() : {};
+                if (this._onUpdate) this._onUpdate('assignments');
+            })
+        );
+
+        // Real-time: Weights
+        this._listeners.push(
+            orgRef.collection('settings').doc('weights').onSnapshot(doc => {
+                this._cache.weights = doc.exists ? doc.data() : this.defaultWeights();
+                if (this._onUpdate) this._onUpdate('weights');
+            })
+        );
+
+        // Wait for initial data to load
+        await Promise.all([
+            orgRef.collection('surveys').get(),
+            orgRef.collection('staff').get(),
+            orgRef.collection('settings').doc('assignments').get(),
+            orgRef.collection('settings').doc('weights').get()
+        ]);
+    },
+
+    unsubscribe() {
+        this._listeners.forEach(unsub => unsub());
+        this._listeners = [];
+    },
+
+    // ===== Survey CRUD =====
+
+    async addSurvey(data) {
+        if (!this._orgId) throw new Error('No org loaded');
+        const docRef = await db.collection('organizations').doc(this._orgId)
+            .collection('surveys').add(data);
+        return docRef.id;
+    },
+
+    async updateSurvey(surveyId, data) {
+        if (!this._orgId) throw new Error('No org loaded');
+        await db.collection('organizations').doc(this._orgId)
+            .collection('surveys').doc(surveyId).update(data);
+    },
+
+    async removeSurvey(surveyId) {
+        if (!this._orgId) throw new Error('No org loaded');
+        await db.collection('organizations').doc(this._orgId)
+            .collection('surveys').doc(surveyId).delete();
+        // Also remove assignment
+        await this.assign(surveyId, null);
+    },
+
+    // ===== Staff CRUD =====
+
+    async addStaff(data) {
+        if (!this._orgId) throw new Error('No org loaded');
+        const docRef = await db.collection('organizations').doc(this._orgId)
+            .collection('staff').add(data);
+        return docRef.id;
+    },
+
+    async updateStaff(staffId, data) {
+        if (!this._orgId) throw new Error('No org loaded');
+        await db.collection('organizations').doc(this._orgId)
+            .collection('staff').doc(staffId).update(data);
+    },
+
+    async removeStaff(staffId) {
+        if (!this._orgId) throw new Error('No org loaded');
+        await db.collection('organizations').doc(this._orgId)
+            .collection('staff').doc(staffId).delete();
+        // Remove any assignments pointing to this staff
+        const updated = { ...this._cache.assignments };
+        let changed = false;
+        Object.keys(updated).forEach(k => {
+            if (updated[k] === staffId) { delete updated[k]; changed = true; }
+        });
+        if (changed) {
+            await db.collection('organizations').doc(this._orgId)
+                .collection('settings').doc('assignments').set(updated);
+        }
+    },
+
+    // ===== Assignments =====
+
+    async assign(surveyId, staffId) {
+        if (!this._orgId) throw new Error('No org loaded');
+        const ref = db.collection('organizations').doc(this._orgId)
+            .collection('settings').doc('assignments');
+        if (staffId) {
+            await ref.set({ [surveyId]: staffId }, { merge: true });
+        } else {
+            await ref.update({ [surveyId]: firebase.firestore.FieldValue.delete() });
+        }
+    },
+
+    // ===== Weights =====
+
+    async setWeights(weights) {
+        if (!this._orgId) throw new Error('No org loaded');
+        await db.collection('organizations').doc(this._orgId)
+            .collection('settings').doc('weights').set(weights);
+    },
+
+    // ===== Bulk Operations =====
+
+    async clearAllData() {
+        if (!this._orgId) throw new Error('No org loaded');
+        const orgRef = db.collection('organizations').doc(this._orgId);
+        // Delete all surveys
+        const surveySnap = await orgRef.collection('surveys').get();
+        const batch1 = db.batch();
+        surveySnap.forEach(doc => batch1.delete(doc.ref));
+        await batch1.commit();
+        // Delete all staff
+        const staffSnap = await orgRef.collection('staff').get();
+        const batch2 = db.batch();
+        staffSnap.forEach(doc => batch2.delete(doc.ref));
+        await batch2.commit();
+        // Reset assignments and weights
+        await orgRef.collection('settings').doc('assignments').set({});
+        await orgRef.collection('settings').doc('weights').set(this.defaultWeights());
+    },
+
+    async loadSampleData() {
+        if (!this._orgId) throw new Error('No org loaded');
+        // Clear first
+        await this.clearAllData();
+
+        const orgRef = db.collection('organizations').doc(this._orgId);
+
+        // Staff
+        const staffMap = {};
+        const staffData = [
+            { name: 'Sarah Chen', role: 'Senior Coordinator' },
+            { name: 'Mike Thompson', role: 'Coordinator' },
+            { name: 'Priya Patel', role: 'Junior Coordinator' },
+            { name: 'David Wilson', role: 'Senior Coordinator' },
+            { name: 'Emma Rodriguez', role: 'Coordinator' },
+            { name: 'James Liu', role: 'Coordinator' }
+        ];
+        const staffKeys = ['s1', 's2', 's3', 's4', 's5', 's6'];
+        for (let i = 0; i < staffData.length; i++) {
+            const ref = await orgRef.collection('staff').add(staffData[i]);
+            staffMap[staffKeys[i]] = ref.id;
+        }
+
+        // Surveys
+        const surveyMap = {};
+        const surveys = _getSampleSurveys();
+        for (const s of surveys) {
+            const oldId = s._oldId;
+            delete s._oldId;
+            const ref = await orgRef.collection('surveys').add(s);
+            surveyMap[oldId] = ref.id;
+        }
+
+        // Assignments
+        const oldAssignments = {
+            v1: 's1', v2: 's1', v8: 's1', v12: 's1', v14: 's1',
+            v3: 's4', v7: 's4', v10: 's4', v25: 's4',
+            v15: 's2', v16: 's2', v19: 's2', v20: 's2',
+            v4: 's6', v5: 's6', v6: 's6', v13: 's6', v18: 's6',
+            v9: 's3', v17: 's3', v26: 's3',
+            v11: 's5', v22: 's5', v23: 's5', v24: 's5',
+            v21: 's4', v27: 's3'
+        };
+        const assignments = {};
+        Object.entries(oldAssignments).forEach(([surveyKey, staffKey]) => {
+            if (surveyMap[surveyKey] && staffMap[staffKey]) {
+                assignments[surveyMap[surveyKey]] = staffMap[staffKey];
+            }
+        });
+        await orgRef.collection('settings').doc('assignments').set(assignments);
+    },
+
+    // ===== Export / Import =====
+
+    exportJSON() {
+        return JSON.stringify({
+            surveys: this._cache.surveys,
+            staff: this._cache.staff,
+            assignments: this._cache.assignments,
+            weights: this._cache.weights
+        }, null, 2);
+    },
+
+    async importJSON(json) {
+        const data = JSON.parse(json);
+        await this.clearAllData();
+        const orgRef = db.collection('organizations').doc(this._orgId);
+        // Import staff
+        const staffMap = {};
+        for (const s of (data.staff || [])) {
+            const oldId = s.id;
+            const { id, ...rest } = s;
+            const ref = await orgRef.collection('staff').add(rest);
+            staffMap[oldId] = ref.id;
+        }
+        // Import surveys
+        const surveyMap = {};
+        for (const s of (data.surveys || [])) {
+            const oldId = s.id;
+            const { id, ...rest } = s;
+            const ref = await orgRef.collection('surveys').add(rest);
+            surveyMap[oldId] = ref.id;
+        }
+        // Import assignments (remap IDs)
+        const assignments = {};
+        Object.entries(data.assignments || {}).forEach(([sId, stId]) => {
+            const newSurveyId = surveyMap[sId] || sId;
+            const newStaffId = staffMap[stId] || stId;
+            assignments[newSurveyId] = newStaffId;
+        });
+        await orgRef.collection('settings').doc('assignments').set(assignments);
+        // Import weights
+        if (data.weights) {
+            await orgRef.collection('settings').doc('weights').set(data.weights);
+        }
+    }
+};
+
+// ===== User Manager (replaces AllowList) =====
+const UserManager = {
+    _currentUser: null,   // { email, orgs: [{orgId, role}] }
+    _currentRole: 'viewer',
+    _isSuperAdmin: false,
+
+    SUPER_ADMIN_COLLECTION: 'superAdmins',
+
+    async loadUser(email) {
+        const lower = email.toLowerCase();
+        const doc = await db.collection('users').doc(lower).get();
+        if (doc.exists) {
+            this._currentUser = { email: lower, ...doc.data() };
+        } else {
+            this._currentUser = null;
+        }
+        // Check super admin
+        const saDoc = await db.collection(this.SUPER_ADMIN_COLLECTION).doc(lower).get();
+        this._isSuperAdmin = saDoc.exists;
+        return this._currentUser;
+    },
+
+    isAllowed(email) {
+        return this._currentUser !== null || this._isSuperAdmin;
+    },
+
+    getUserOrgs() {
+        if (!this._currentUser) return [];
+        return this._currentUser.organizations || [];
+    },
+
+    getRoleForOrg(orgId) {
+        if (this._isSuperAdmin) return 'admin';
+        const orgs = this.getUserOrgs();
+        const entry = orgs.find(o => o.orgId === orgId);
+        return entry ? entry.role : null;
+    },
+
+    async setRoleForOrg(email, orgId, role) {
+        const lower = email.toLowerCase();
+        const docRef = db.collection('users').doc(lower);
+        const doc = await docRef.get();
+        let orgs = doc.exists ? (doc.data().organizations || []) : [];
+        const idx = orgs.findIndex(o => o.orgId === orgId);
+        if (idx >= 0) {
+            orgs[idx].role = role;
+        } else {
+            orgs.push({ orgId, role });
+        }
+        await docRef.set({ organizations: orgs, lastUpdated: new Date().toISOString() }, { merge: true });
+    },
+
+    async removeUserFromOrg(email, orgId) {
+        const lower = email.toLowerCase();
+        const docRef = db.collection('users').doc(lower);
+        const doc = await docRef.get();
+        if (!doc.exists) return;
+        let orgs = doc.data().organizations || [];
+        orgs = orgs.filter(o => o.orgId !== orgId);
+        await docRef.update({ organizations: orgs });
+    },
+
+    async listOrgUsers(orgId) {
+        // Query all users who have this orgId in their organizations array
+        const snap = await db.collection('users').get();
+        const users = [];
+        snap.forEach(doc => {
+            const data = doc.data();
+            const orgEntry = (data.organizations || []).find(o => o.orgId === orgId);
+            if (orgEntry) {
+                users.push({ email: doc.id, role: orgEntry.role, ...data });
+            }
+        });
+        return users;
+    },
+
+    async seedSuperAdmin(email) {
+        const lower = email.toLowerCase();
+        // Check if any super admins exist
+        const snap = await db.collection(this.SUPER_ADMIN_COLLECTION).get();
+        if (snap.empty) {
+            await db.collection(this.SUPER_ADMIN_COLLECTION).doc(lower).set({
+                addedAt: new Date().toISOString()
+            });
+            // Also create user doc
+            await db.collection('users').doc(lower).set({
+                organizations: [],
+                lastUpdated: new Date().toISOString()
+            }, { merge: true });
+            this._isSuperAdmin = true;
+            console.log('Seeded super admin:', lower);
+        }
+    },
+
+    async ensureUserDoc(email) {
+        const lower = email.toLowerCase();
+        const docRef = db.collection('users').doc(lower);
+        const doc = await docRef.get();
+        if (!doc.exists) {
+            await docRef.set({ organizations: [], lastUpdated: new Date().toISOString() });
+        }
+    }
+};
+
+// ===== Sample Survey Data Factory =====
+function _getSampleSurveys() {
+    const mk = (oldId, name, code, d) => ({ _oldId: oldId, name, code, ...d });
+    return [
+        mk('v1', 'Routine Chemistry', 'CHEM-RC', { surveyType: 'quantitative', materialType: 'Lyophilized', analytes: 35, challengesPerRound: 3, roundsPerYear: 6, participants: 400, jurisdictions: 13, inquiryRate: 4, correctiveActions: 40, peerGroups: 15, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 2400, coldChain: false, slidePrep: false, accreditationBodies: 3, reportComplexity: 4, remediationRate: 3, regulatoryChangeFreq: 3, committeeMeetings: 2, consensusRounds: 0, educationalComponent: false }),
+        mk('v2', 'Blood Gas & Oximetry', 'CHEM-BG', { surveyType: 'quantitative', materialType: 'Liquid', analytes: 12, challengesPerRound: 3, roundsPerYear: 6, participants: 350, jurisdictions: 13, inquiryRate: 3, correctiveActions: 25, peerGroups: 8, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 2100, coldChain: true, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v3', 'Urinalysis Dipstick', 'CHEM-UDIP', { surveyType: 'mixed', materialType: 'Liquid', analytes: 10, challengesPerRound: 2, roundsPerYear: 4, participants: 380, jurisdictions: 13, inquiryRate: 3, correctiveActions: 20, peerGroups: 5, gradingMethod: 2, expertPanelNeeded: false, shipmentsPerYear: 1520, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 2, remediationRate: 2, regulatoryChangeFreq: 1, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v4', 'Urine Chemistry', 'CHEM-UC', { surveyType: 'quantitative', materialType: 'Liquid', analytes: 15, challengesPerRound: 2, roundsPerYear: 4, participants: 250, jurisdictions: 10, inquiryRate: 2, correctiveActions: 15, peerGroups: 8, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 1000, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v5', 'B-Type Natriuretic Peptide', 'CHEM-BNP', { surveyType: 'quantitative', materialType: 'Lyophilized', analytes: 2, challengesPerRound: 2, roundsPerYear: 4, participants: 150, jurisdictions: 10, inquiryRate: 3, correctiveActions: 10, peerGroups: 4, gradingMethod: 2, expertPanelNeeded: false, shipmentsPerYear: 600, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 2, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 0, consensusRounds: 0, educationalComponent: false }),
+        mk('v6', 'Fecal Occult Blood', 'CHEM-FOB', { surveyType: 'qualitative', materialType: 'Other', analytes: 1, challengesPerRound: 5, roundsPerYear: 4, participants: 300, jurisdictions: 13, inquiryRate: 2, correctiveActions: 15, peerGroups: 3, gradingMethod: 2, expertPanelNeeded: false, shipmentsPerYear: 1200, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 2, remediationRate: 3, regulatoryChangeFreq: 1, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v7', 'Hemoglobin A1c', 'CHEM-A1C', { surveyType: 'quantitative', materialType: 'Whole Blood', analytes: 1, challengesPerRound: 3, roundsPerYear: 4, participants: 350, jurisdictions: 13, inquiryRate: 3, correctiveActions: 18, peerGroups: 6, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 1400, coldChain: true, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v8', 'CBC & Leukocyte Differential', 'HEMA-LD', { surveyType: 'quantitative', materialType: 'Whole Blood', analytes: 22, challengesPerRound: 3, roundsPerYear: 6, participants: 400, jurisdictions: 13, inquiryRate: 4, correctiveActions: 35, peerGroups: 12, gradingMethod: 4, expertPanelNeeded: false, shipmentsPerYear: 2400, coldChain: true, slidePrep: false, accreditationBodies: 3, reportComplexity: 5, remediationRate: 3, regulatoryChangeFreq: 3, committeeMeetings: 2, consensusRounds: 0, educationalComponent: false }),
+        mk('v9', 'Peripheral Blood Film', 'MORP-VSB', { surveyType: 'qualitative', materialType: 'Glass Slides', analytes: 8, challengesPerRound: 5, roundsPerYear: 3, participants: 200, jurisdictions: 13, inquiryRate: 3, correctiveActions: 12, peerGroups: 1, gradingMethod: 5, expertPanelNeeded: true, shipmentsPerYear: 0, coldChain: false, slidePrep: true, accreditationBodies: 2, reportComplexity: 4, remediationRate: 3, regulatoryChangeFreq: 1, committeeMeetings: 3, consensusRounds: 3, educationalComponent: true }),
+        mk('v10', 'Erythrocyte Sedimentation Rate', 'HEMA-SR', { surveyType: 'quantitative', materialType: 'Whole Blood', analytes: 1, challengesPerRound: 2, roundsPerYear: 4, participants: 300, jurisdictions: 13, inquiryRate: 2, correctiveActions: 10, peerGroups: 3, gradingMethod: 2, expertPanelNeeded: false, shipmentsPerYear: 1200, coldChain: true, slidePrep: false, accreditationBodies: 2, reportComplexity: 2, remediationRate: 2, regulatoryChangeFreq: 1, committeeMeetings: 0, consensusRounds: 0, educationalComponent: false }),
+        mk('v11', 'Fetal-Maternal Hemorrhage', 'HEMA-FMH', { surveyType: 'mixed', materialType: 'Whole Blood', analytes: 2, challengesPerRound: 2, roundsPerYear: 3, participants: 120, jurisdictions: 10, inquiryRate: 2, correctiveActions: 6, peerGroups: 3, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 360, coldChain: true, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 2, regulatoryChangeFreq: 1, committeeMeetings: 1, consensusRounds: 1, educationalComponent: false }),
+        mk('v12', 'Routine Coagulation', 'COAG', { surveyType: 'mixed', materialType: 'Lyophilized', analytes: 7, challengesPerRound: 3, roundsPerYear: 6, participants: 380, jurisdictions: 13, inquiryRate: 4, correctiveActions: 30, peerGroups: 10, gradingMethod: 4, expertPanelNeeded: false, shipmentsPerYear: 2280, coldChain: false, slidePrep: false, accreditationBodies: 3, reportComplexity: 4, remediationRate: 3, regulatoryChangeFreq: 3, committeeMeetings: 2, consensusRounds: 1, educationalComponent: false }),
+        mk('v13', 'Immunology & CRP', 'IMGY', { surveyType: 'quantitative', materialType: 'Lyophilized', analytes: 8, challengesPerRound: 2, roundsPerYear: 4, participants: 250, jurisdictions: 13, inquiryRate: 3, correctiveActions: 18, peerGroups: 6, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 1000, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v14', 'Endocrinology & Tumour Markers', 'ENDO-A', { surveyType: 'quantitative', materialType: 'Lyophilized', analytes: 28, challengesPerRound: 2, roundsPerYear: 4, participants: 300, jurisdictions: 13, inquiryRate: 4, correctiveActions: 25, peerGroups: 12, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 1200, coldChain: false, slidePrep: false, accreditationBodies: 3, reportComplexity: 4, remediationRate: 3, regulatoryChangeFreq: 3, committeeMeetings: 2, consensusRounds: 0, educationalComponent: false }),
+        mk('v15', 'Drug Monitoring', 'DRUG', { surveyType: 'quantitative', materialType: 'Lyophilized', analytes: 18, challengesPerRound: 2, roundsPerYear: 4, participants: 200, jurisdictions: 10, inquiryRate: 2, correctiveActions: 12, peerGroups: 8, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 800, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v16', 'Urine Drugs of Abuse', 'DRUG-UA', { surveyType: 'qualitative', materialType: 'Liquid', analytes: 12, challengesPerRound: 1, roundsPerYear: 4, participants: 280, jurisdictions: 13, inquiryRate: 3, correctiveActions: 18, peerGroups: 4, gradingMethod: 3, expertPanelNeeded: false, shipmentsPerYear: 1120, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 3, regulatoryChangeFreq: 2, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v17', 'Bacteriology Gram Stain', 'BACT-DGS', { surveyType: 'qualitative', materialType: 'Glass Slides', analytes: 5, challengesPerRound: 5, roundsPerYear: 3, participants: 250, jurisdictions: 13, inquiryRate: 3, correctiveActions: 15, peerGroups: 1, gradingMethod: 4, expertPanelNeeded: true, shipmentsPerYear: 0, coldChain: false, slidePrep: true, accreditationBodies: 2, reportComplexity: 3, remediationRate: 3, regulatoryChangeFreq: 1, committeeMeetings: 3, consensusRounds: 3, educationalComponent: true }),
+        mk('v18', 'Molecular Microbiology STI', 'MOLE-STI', { surveyType: 'qualitative', materialType: 'Swab/Culture', analytes: 3, challengesPerRound: 3, roundsPerYear: 3, participants: 180, jurisdictions: 13, inquiryRate: 3, correctiveActions: 8, peerGroups: 2, gradingMethod: 3, expertPanelNeeded: true, shipmentsPerYear: 540, coldChain: true, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 2, regulatoryChangeFreq: 3, committeeMeetings: 2, consensusRounds: 2, educationalComponent: false }),
+        mk('v19', 'Virology - HIV', 'VIRO-HIV', { surveyType: 'qualitative', materialType: 'Liquid', analytes: 2, challengesPerRound: 3, roundsPerYear: 3, participants: 220, jurisdictions: 13, inquiryRate: 3, correctiveActions: 12, peerGroups: 3, gradingMethod: 3, expertPanelNeeded: true, shipmentsPerYear: 660, coldChain: true, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 2, consensusRounds: 2, educationalComponent: false }),
+        mk('v20', 'SARS-CoV-2', 'VIRO-COV', { surveyType: 'qualitative', materialType: 'Swab/Culture', analytes: 1, challengesPerRound: 3, roundsPerYear: 4, participants: 350, jurisdictions: 13, inquiryRate: 5, correctiveActions: 30, peerGroups: 4, gradingMethod: 3, expertPanelNeeded: true, shipmentsPerYear: 1400, coldChain: true, slidePrep: false, accreditationBodies: 3, reportComplexity: 3, remediationRate: 3, regulatoryChangeFreq: 5, committeeMeetings: 4, consensusRounds: 2, educationalComponent: false }),
+        mk('v21', 'Leukocyte Immunophenotyping', 'FLOW-HD', { surveyType: 'quantitative', materialType: 'Whole Blood', analytes: 15, challengesPerRound: 2, roundsPerYear: 3, participants: 120, jurisdictions: 10, inquiryRate: 3, correctiveActions: 8, peerGroups: 4, gradingMethod: 4, expertPanelNeeded: true, shipmentsPerYear: 360, coldChain: true, slidePrep: false, accreditationBodies: 2, reportComplexity: 5, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 2, consensusRounds: 1, educationalComponent: false }),
+        mk('v22', 'Cytogenetics G-banding', 'GENE-CG', { surveyType: 'qualitative', materialType: 'Glass Slides', analytes: 5, challengesPerRound: 3, roundsPerYear: 3, participants: 60, jurisdictions: 8, inquiryRate: 2, correctiveActions: 5, peerGroups: 1, gradingMethod: 5, expertPanelNeeded: true, shipmentsPerYear: 0, coldChain: false, slidePrep: true, accreditationBodies: 2, reportComplexity: 5, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 3, consensusRounds: 3, educationalComponent: true }),
+        mk('v23', 'POCT Glucose', 'POCT-GLU', { surveyType: 'quantitative', materialType: 'Liquid', analytes: 1, challengesPerRound: 2, roundsPerYear: 4, participants: 400, jurisdictions: 13, inquiryRate: 3, correctiveActions: 25, peerGroups: 3, gradingMethod: 2, expertPanelNeeded: false, shipmentsPerYear: 1600, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 2, remediationRate: 3, regulatoryChangeFreq: 1, committeeMeetings: 1, consensusRounds: 0, educationalComponent: false }),
+        mk('v24', 'POCT Coagulation INR', 'POCT-INR', { surveyType: 'quantitative', materialType: 'Liquid', analytes: 1, challengesPerRound: 2, roundsPerYear: 4, participants: 200, jurisdictions: 13, inquiryRate: 3, correctiveActions: 12, peerGroups: 3, gradingMethod: 2, expertPanelNeeded: false, shipmentsPerYear: 800, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 2, remediationRate: 2, regulatoryChangeFreq: 2, committeeMeetings: 0, consensusRounds: 0, educationalComponent: false }),
+        mk('v25', 'Transfusion Medicine', 'TMED-AAU', { surveyType: 'mixed', materialType: 'Whole Blood', analytes: 6, challengesPerRound: 3, roundsPerYear: 4, participants: 180, jurisdictions: 13, inquiryRate: 4, correctiveActions: 15, peerGroups: 5, gradingMethod: 4, expertPanelNeeded: true, shipmentsPerYear: 720, coldChain: true, slidePrep: false, accreditationBodies: 3, reportComplexity: 4, remediationRate: 3, regulatoryChangeFreq: 3, committeeMeetings: 3, consensusRounds: 2, educationalComponent: false }),
+        mk('v26', 'Cytology Non-Gynecological', 'CYTO-NG', { surveyType: 'qualitative', materialType: 'Glass Slides', analytes: 4, challengesPerRound: 5, roundsPerYear: 2, participants: 150, jurisdictions: 10, inquiryRate: 2, correctiveActions: 8, peerGroups: 1, gradingMethod: 5, expertPanelNeeded: true, shipmentsPerYear: 0, coldChain: false, slidePrep: true, accreditationBodies: 2, reportComplexity: 4, remediationRate: 3, regulatoryChangeFreq: 1, committeeMeetings: 4, consensusRounds: 4, educationalComponent: true }),
+        mk('v27', 'Pathology Educational', 'PATH-E', { surveyType: 'qualitative', materialType: 'Digital Images', analytes: 6, challengesPerRound: 5, roundsPerYear: 2, participants: 100, jurisdictions: 8, inquiryRate: 2, correctiveActions: 4, peerGroups: 1, gradingMethod: 5, expertPanelNeeded: true, shipmentsPerYear: 0, coldChain: false, slidePrep: false, accreditationBodies: 2, reportComplexity: 3, remediationRate: 1, regulatoryChangeFreq: 1, committeeMeetings: 4, consensusRounds: 4, educationalComponent: true })
+    ];
+}
