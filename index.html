@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PT Survey Load Leveling Dashboard — Objectively measure and visualize workload distribution across survey coordinators in a proficiency testing organization.">
+    <title>PT Survey Load Leveling Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.0/firebase-firestore-compat.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Auth Login Gate -->
+    <div class="login-gate" id="login-gate">
+        <div class="login-card">
+            <div class="login-brand">
+                <span class="login-brand-icon">⚖️</span>
+                <h1>LoadLevel</h1>
+                <p>PT Survey Load Leveling Dashboard</p>
+            </div>
+
+            <!-- Email/Password Form -->
+            <div id="email-auth-form">
+                <div class="form-group" style="text-align:left;">
+                    <label for="login-email" style="color:var(--text-secondary);font-size:0.85rem;">Email</label>
+                    <input type="email" class="form-control" id="login-email" placeholder="user@example.com" autocomplete="email">
+                </div>
+                <div class="form-group" style="text-align:left;">
+                    <label for="login-password" style="color:var(--text-secondary);font-size:0.85rem;">Password</label>
+                    <input type="password" class="form-control" id="login-password" placeholder="••••••••" autocomplete="current-password">
+                </div>
+                <div id="login-error" class="login-error" style="display:none;"></div>
+                <button class="btn btn-primary" id="btn-email-signin" style="width:100%;margin-bottom:8px;">Sign In</button>
+                <div style="display:flex;justify-content:space-between;font-size:0.82rem;">
+                    <a href="#" id="btn-toggle-signup" style="color:var(--accent-primary);">Create account</a>
+                    <a href="#" id="btn-forgot-password" style="color:var(--text-muted);">Forgot password?</a>
+                </div>
+            </div>
+
+            <!-- Divider -->
+            <div class="auth-divider"><span>OR</span></div>
+
+            <!-- Google Sign-In -->
+            <button class="btn-google-signin" id="btn-google-signin">
+                <svg viewBox="0 0 24 24" width="20" height="20"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                Sign in with Google
+            </button>
+
+            <div class="login-denied" id="login-denied" style="display:none;">
+                <p>⛔ Access denied. Your account is not authorized.</p>
+                <button class="btn btn-ghost" id="btn-signout-denied">Try another account</button>
+            </div>
+            <p class="login-footer">Authorized IQMH personnel only</p>
+        </div>
+    </div>
+
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <div class="brand-icon">⚖️</div>
+            <span class="brand-text">LoadLevel</span>
+        </div>
+        <div class="sidebar-user" id="sidebar-user" style="display:none;">
+            <img class="user-avatar" id="user-avatar" src="" alt="User" />
+            <span class="user-name" id="user-name"></span>
+            <button class="btn-signout" id="btn-signout" title="Sign out">↩</button>
+        </div>
+        <nav class="sidebar-nav">
+            <button class="nav-item active" data-panel="dashboard" id="nav-dashboard">
+                <span class="nav-icon">📊</span>
+                <span class="nav-label">Dashboard</span>
+            </button>
+            <button class="nav-item" data-panel="staff" id="nav-staff">
+                <span class="nav-icon">👥</span>
+                <span class="nav-label">Staff</span>
+            </button>
+            <button class="nav-item" data-panel="surveys" id="nav-surveys">
+                <span class="nav-icon">📋</span>
+                <span class="nav-label">Surveys</span>
+            </button>
+            <button class="nav-item" data-panel="assignments" id="nav-assignments">
+                <span class="nav-icon">🔗</span>
+                <span class="nav-label">Assignments</span>
+            </button>
+            <button class="nav-item" data-panel="settings" id="nav-settings">
+                <span class="nav-icon">⚙️</span>
+                <span class="nav-label">Settings</span>
+            </button>
+        </nav>
+        <div class="sidebar-footer">
+            <button class="btn-icon" id="btn-toggle-sidebar" title="Collapse sidebar">
+                <span>◀</span>
+            </button>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content" id="main-content">
+        <!-- ==================== DASHBOARD PANEL ==================== -->
+        <section class="panel active" id="panel-dashboard">
+            <div class="panel-header">
+                <h1>Workload Dashboard</h1>
+                <div class="panel-actions">
+                    <button class="btn btn-secondary" id="btn-what-if" title="What-If Simulator">
+                        <span>🔮</span> What-If Simulator
+                    </button>
+                </div>
+            </div>
+
+            <!-- Summary Stats -->
+            <div class="stats-row" id="dashboard-stats">
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-blue">👥</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-total-staff">0</span>
+                        <span class="stat-label">Total Staff</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-purple">📋</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-total-surveys">0</span>
+                        <span class="stat-label">Total Surveys</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-green">📈</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-avg-workload">0</span>
+                        <span class="stat-label">Avg Workload</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon stat-icon-red">⚠️</div>
+                    <div class="stat-info">
+                        <span class="stat-value" id="stat-imbalance">0%</span>
+                        <span class="stat-label">Imbalance Index</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Row -->
+            <div class="charts-row">
+                <div class="card chart-card chart-card-wide">
+                    <div class="card-header">
+                        <h2>Workload by Staff Member</h2>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="chart-workload-bar"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="charts-row">
+                <div class="card chart-card">
+                    <div class="card-header">
+                        <h2>Category Breakdown</h2>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="chart-category-radar"></canvas>
+                    </div>
+                </div>
+                <div class="card chart-card">
+                    <div class="card-header">
+                        <h2>🔥 Hot Spots</h2>
+                    </div>
+                    <div class="hotspots-container" id="hotspots-list">
+                        <div class="empty-state">No data yet — add staff and surveys to begin.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- What-If Simulator Panel (hidden by default) -->
+            <div class="card what-if-panel" id="what-if-panel" style="display:none;">
+                <div class="card-header">
+                    <h2>🔮 What-If Simulator</h2>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-sm btn-secondary" id="btn-whatif-add-row">+ Add Reassignment</button>
+                        <button class="btn btn-sm btn-ghost" id="btn-close-what-if">✕ Close</button>
+                    </div>
+                </div>
+                <div class="what-if-rows" id="whatif-rows">
+                    <!-- Dynamic reassignment rows go here -->
+                </div>
+                <div class="what-if-actions" style="display:flex;gap:10px;margin-top:16px;">
+                    <button class="btn btn-primary" id="btn-whatif-preview">Preview All Changes</button>
+                    <button class="btn btn-success" id="btn-whatif-apply" style="display:none;">Apply All Changes</button>
+                </div>
+                <div class="what-if-results" id="whatif-results" style="display:none;">
+                    <div class="what-if-comparison">
+                        <div class="what-if-before" id="whatif-before"></div>
+                        <div class="what-if-after" id="whatif-after"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== STAFF PANEL ==================== -->
+        <section class="panel" id="panel-staff">
+            <div class="panel-header">
+                <h1>Staff Management</h1>
+                <button class="btn btn-primary" id="btn-add-staff">
+                    <span>+</span> Add Staff Member
+                </button>
+            </div>
+            <div class="card">
+                <table class="data-table" id="staff-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Role</th>
+                            <th>Assigned Surveys</th>
+                            <th>Workload Score</th>
+                            <th>Load Level</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="staff-table-body">
+                    </tbody>
+                </table>
+                <div class="empty-state" id="staff-empty" style="display:none;">
+                    No staff members yet. Click <strong>Add Staff Member</strong> to get started.
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== SURVEYS PANEL ==================== -->
+        <section class="panel" id="panel-surveys">
+            <div class="panel-header">
+                <h1>Survey Management</h1>
+                <button class="btn btn-primary" id="btn-add-survey">
+                    <span>+</span> Add Survey
+                </button>
+            </div>
+            <div class="card">
+                <table class="data-table" id="surveys-table">
+                    <thead>
+                        <tr>
+                            <th>Survey Name</th>
+                            <th>Code</th>
+                            <th>Complexity Score</th>
+                            <th>Assigned To</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="surveys-table-body">
+                    </tbody>
+                </table>
+                <div class="empty-state" id="surveys-empty" style="display:none;">
+                    No surveys yet. Click <strong>Add Survey</strong> to get started.
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== ASSIGNMENTS PANEL ==================== -->
+        <section class="panel" id="panel-assignments">
+            <div class="panel-header">
+                <h1>Survey Assignments</h1>
+                <p class="panel-subtitle">Assign surveys to staff members and see workload impact in real-time.</p>
+            </div>
+            <div class="assignments-layout">
+                <div class="card assignments-card">
+                    <table class="data-table" id="assignments-table">
+                        <thead>
+                            <tr>
+                                <th>Survey</th>
+                                <th>Complexity</th>
+                                <th>Assigned To</th>
+                                <th>Impact</th>
+                            </tr>
+                        </thead>
+                        <tbody id="assignments-table-body">
+                        </tbody>
+                    </table>
+                    <div class="empty-state" id="assignments-empty" style="display:none;">
+                        Add surveys and staff first, then assign surveys here.
+                    </div>
+                </div>
+                <div class="card workload-preview-card" id="workload-preview-card">
+                    <h3>Live Workload Preview</h3>
+                    <div id="workload-preview-bars"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== SETTINGS PANEL ==================== -->
+        <section class="panel" id="panel-settings">
+            <div class="panel-header">
+                <h1>Settings</h1>
+            </div>
+
+            <div class="settings-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Category Weights</h2>
+                        <p class="card-subtitle">Adjust how much each dimension contributes to the final workload score. Weights must sum to 100%.</p>
+                    </div>
+                    <div class="weights-container" id="weights-container">
+                        <div class="weight-slider-group">
+                            <label>
+                                <span class="weight-label">🧪 Analyte Volume</span>
+                                <span class="weight-value" id="weight-val-analyteVolume">25%</span>
+                            </label>
+                            <input type="range" min="0" max="100" value="25" class="weight-slider" id="weight-analyteVolume" data-category="analyteVolume">
+                        </div>
+                        <div class="weight-slider-group">
+                            <label>
+                                <span class="weight-label">👥 Participant Load</span>
+                                <span class="weight-value" id="weight-val-participantLoad">20%</span>
+                            </label>
+                            <input type="range" min="0" max="100" value="20" class="weight-slider" id="weight-participantLoad" data-category="participantLoad">
+                        </div>
+                        <div class="weight-slider-group">
+                            <label>
+                                <span class="weight-label">📊 Grading Complexity</span>
+                                <span class="weight-value" id="weight-val-gradingComplexity">20%</span>
+                            </label>
+                            <input type="range" min="0" max="100" value="20" class="weight-slider" id="weight-gradingComplexity" data-category="gradingComplexity">
+                        </div>
+                        <div class="weight-slider-group">
+                            <label>
+                                <span class="weight-label">📦 Material & Shipping</span>
+                                <span class="weight-value" id="weight-val-materialShipping">15%</span>
+                            </label>
+                            <input type="range" min="0" max="100" value="15" class="weight-slider" id="weight-materialShipping" data-category="materialShipping">
+                        </div>
+                        <div class="weight-slider-group">
+                            <label>
+                                <span class="weight-label">📜 Regulatory & Reporting</span>
+                                <span class="weight-value" id="weight-val-regulatoryReporting">12%</span>
+                            </label>
+                            <input type="range" min="0" max="100" value="12" class="weight-slider" id="weight-regulatoryReporting" data-category="regulatoryReporting">
+                        </div>
+                        <div class="weight-slider-group">
+                            <label>
+                                <span class="weight-label">🤝 Committee Work</span>
+                                <span class="weight-value" id="weight-val-committeeWork">8%</span>
+                            </label>
+                            <input type="range" min="0" max="100" value="8" class="weight-slider" id="weight-committeeWork" data-category="committeeWork">
+                        </div>
+                        <div class="weight-total" id="weight-total">
+                            Total: <strong>100%</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Data Management</h2>
+                    </div>
+                    <div class="data-management-actions">
+                        <button class="btn btn-secondary" id="btn-export-data">📥 Export Data (JSON)</button>
+                        <button class="btn btn-secondary" id="btn-import-data">📤 Import Data (JSON)</button>
+                        <input type="file" id="import-file-input" accept=".json" style="display:none;">
+                        <hr>
+                        <button class="btn btn-danger" id="btn-clear-data">🗑️ Clear All Data</button>
+                        <button class="btn btn-secondary" id="btn-load-sample">🔄 Load Sample Data</button>
+                    </div>
+                </div>
+
+                <!-- User Management (Admin Only) -->
+                <div class="card" id="user-management-card" style="display:none;">
+                    <div class="card-header">
+                        <h2>🔐 Authorized Users</h2>
+                        <p class="card-subtitle">Manage who can access the dashboard. Only admins can add or remove users.</p>
+                    </div>
+                    <div class="user-mgmt-add">
+                        <input type="email" class="form-control" id="add-user-email" placeholder="user@example.com">
+                        <select class="form-control" id="add-user-role" style="max-width:130px;">
+                            <option value="viewer" selected>Viewer</option>
+                            <option value="editor">Editor</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                        <button class="btn btn-primary" id="btn-add-user">+ Add</button>
+                    </div>
+                    <table class="data-table" id="user-table">
+                        <thead>
+                            <tr>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Added</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="user-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal Overlay -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal" id="modal">
+            <div class="modal-header">
+                <h2 id="modal-title">Modal Title</h2>
+                <button class="btn-icon modal-close" id="modal-close">✕</button>
+            </div>
+            <div class="modal-body" id="modal-body">
+            </div>
+            <div class="modal-footer" id="modal-footer">
+                <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="modal-save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="auth.js"></script>
+    <script src="app.js"></script>
+    <script src="ui.js"></script>
+</body>
+</html>

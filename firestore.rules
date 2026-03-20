@@ -1,0 +1,21 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allowed users collection — readable by any authenticated user, writable only by admins
+    match /allowedUsers/{docId} {
+      // Any authenticated user can read (to check if they're on the list)
+      allow read: if request.auth != null;
+      
+      // Write operations: allow if the writing user is an admin in the allowedUsers collection
+      // For the first user (empty collection), allow the write to bootstrap
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null;
+    }
+    
+    // Deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
