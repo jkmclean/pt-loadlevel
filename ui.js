@@ -438,6 +438,8 @@ function renderSettings() {
     updateWeightTotal();
     renderOrgManagement();
     renderUserManagement();
+    renderBrandingSettings();
+    renderPlatformOverview();
 }
 
 // ===== Org Picker (Sidebar) =====
@@ -461,6 +463,9 @@ async function renderOrgPicker() {
     ).join('');
 
     select.onchange = () => Auth.switchOrg(select.value);
+
+    // Apply branding when org picker renders
+    applyOrgBranding();
 }
 
 // ===== Org Management (Super Admin) =====
@@ -936,6 +941,7 @@ const AUDIT_ACTION_META = {
     'user.removed':      { icon: '🚫', verb: 'removed user' },
     'org.created':       { icon: '🏢', verb: 'created organization' },
     'org.deleted':       { icon: '🗑️', verb: 'deleted organization' },
+    'org.branding':      { icon: '🎨', verb: 'updated branding' },
     'snapshot.taken':    { icon: '📸', verb: 'took snapshot' },
     'snapshot.deleted':  { icon: '🗑️', verb: 'deleted snapshot' },
 };
@@ -1001,6 +1007,107 @@ async function renderActivityLog() {
     } catch (err) {
         Logger.error('ui', 'Activity log render failed', null, err);
         feed.innerHTML = '<div class="empty-state">Failed to load activity log.</div>';
+    }
+}
+
+// ===== Org Branding =====
+async function applyOrgBranding() {
+    try {
+        const branding = await FirestoreStore.getOrgBranding(Auth._currentOrgId);
+        const brandText = document.querySelector('.brand-text');
+        if (branding.displayName) {
+            brandText.textContent = branding.displayName;
+            document.title = branding.displayName + ' — LoadLevel';
+        } else {
+            brandText.textContent = 'LoadLevel';
+            document.title = 'PT Survey Load Leveling Dashboard';
+        }
+        if (branding.accentColor) {
+            document.documentElement.style.setProperty('--accent-primary', branding.accentColor);
+        } else {
+            document.documentElement.style.removeProperty('--accent-primary');
+        }
+    } catch (err) {
+        Logger.error('ui', 'Apply branding failed', null, err);
+    }
+}
+
+async function renderBrandingSettings() {
+    const card = document.getElementById('branding-card');
+    const canEdit = Roles.canManageUsers(Auth._currentRole) || UserManager._isSuperAdmin;
+    if (!canEdit) { card.style.display = 'none'; return; }
+    card.style.display = '';
+
+    const branding = await FirestoreStore.getOrgBranding(Auth._currentOrgId);
+    document.getElementById('branding-name').value = branding.displayName || '';
+    document.getElementById('branding-color').value = branding.accentColor || '#667eea';
+    document.getElementById('branding-color-hex').value = branding.accentColor || '#667eea';
+
+    // Sync color picker and hex input
+    document.getElementById('branding-color').oninput = (e) => {
+        document.getElementById('branding-color-hex').value = e.target.value;
+    };
+    document.getElementById('branding-color-hex').oninput = (e) => {
+        if (/^#[0-9a-f]{6}$/i.test(e.target.value)) {
+            document.getElementById('branding-color').value = e.target.value;
+        }
+    };
+
+    document.getElementById('btn-save-branding').onclick = async () => {
+        const newBranding = {
+            displayName: document.getElementById('branding-name').value.trim(),
+            accentColor: document.getElementById('branding-color-hex').value.trim(),
+            logoUrl: ''
+        };
+        try {
+            await FirestoreStore.updateOrgBranding(Auth._currentOrgId, newBranding);
+            applyOrgBranding();
+            showToast('Branding saved', 'success');
+        } catch (err) {
+            Logger.error('ui', 'Save branding failed', null, err);
+            showToast('Failed to save branding', 'error');
+        }
+    };
+
+    document.getElementById('btn-reset-branding').onclick = async () => {
+        try {
+            await FirestoreStore.updateOrgBranding(Auth._currentOrgId, { displayName: '', accentColor: '', logoUrl: '' });
+            applyOrgBranding();
+            renderBrandingSettings();
+            showToast('Branding reset to default', 'info');
+        } catch (err) {
+            Logger.error('ui', 'Reset branding failed', null, err);
+            showToast('Failed to reset branding', 'error');
+        }
+    };
+}
+
+async function renderPlatformOverview() {
+    const card = document.getElementById('platform-overview-card');
+    if (!UserManager._isSuperAdmin) { card.style.display = 'none'; return; }
+    card.style.display = '';
+
+    try {
+        const stats = await FirestoreStore.getPlatformStats();
+        document.getElementById('platform-stats').innerHTML = `
+            <div class="stat-card"><div class="stat-value">${stats.totalOrgs}</div><div class="stat-label">Organizations</div></div>
+            <div class="stat-card"><div class="stat-value">${stats.totalUsers}</div><div class="stat-label">Total Users</div></div>
+            <div class="stat-card"><div class="stat-value">${stats.totalSurveys}</div><div class="stat-label">Total Surveys</div></div>
+            <div class="stat-card"><div class="stat-value">${stats.totalStaff}</div><div class="stat-label">Total Staff</div></div>
+        `;
+        document.getElementById('platform-orgs-body').innerHTML = stats.orgs.map(o => {
+            const created = o.createdAt?.toDate ? o.createdAt.toDate().toLocaleDateString() : (o.createdAt?.seconds ? new Date(o.createdAt.seconds * 1000).toLocaleDateString() : '—');
+            return `<tr>
+                <td><strong>${o.name}</strong></td>
+                <td>${o.users}</td>
+                <td>${o.surveys}</td>
+                <td>${o.staff}</td>
+                <td style="color:var(--text-muted)">${created}</td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        Logger.error('ui', 'Platform overview failed', null, err);
+        document.getElementById('platform-stats').innerHTML = '<p style="color:var(--text-muted)">Failed to load platform stats.</p>';
     }
 }
 

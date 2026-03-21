@@ -40,6 +40,7 @@
 | **BR-D8** | All data mutations must write an audit log entry via `FirestoreStore.writeAuditEntry()` |
 | **BR-D9** | Audit log entries are immutable — they cannot be edited or deleted by any role |
 | **BR-D10** | Snapshots are immutable records; only Admin+ can delete them |
+| **BR-D11** | Self-service onboarding creates the user as Admin of the new org |
 
 ## Authentication
 
@@ -49,6 +50,7 @@
 | **BR-A2** | All authenticated users must have a `/users/{email}` doc to access the app |
 | **BR-A3** | Super Admins always get access, regardless of org assignments |
 | **BR-A4** | Regular users must be assigned to at least one organization to pass the login gate |
+| **BR-A5** | Sessions expire after 30 minutes of inactivity; a warning is shown at 25 minutes |
 
 ## UI/UX
 

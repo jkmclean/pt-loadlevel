@@ -38,6 +38,77 @@ const Roles = {
     canManageOrgs() { return UserManager._isSuperAdmin; },
 };
 
+// ===== Session Timeout =====
+const SessionTimer = {
+    TIMEOUT_MS: 30 * 60 * 1000,    // 30 minutes
+    WARNING_MS: 25 * 60 * 1000,    // warning at 25 min
+    _idleTimer: null,
+    _warningTimer: null,
+    _countdownInterval: null,
+    _active: false,
+
+    start() {
+        if (this._active) return;
+        this._active = true;
+        const events = ['mousemove', 'keydown', 'touchstart', 'scroll', 'click'];
+        this._resetHandler = () => this.reset();
+        events.forEach(e => document.addEventListener(e, this._resetHandler, { passive: true }));
+        this._scheduleTimers();
+        Logger.info('auth', 'Session timer started', { timeoutMin: 30 });
+    },
+
+    stop() {
+        this._active = false;
+        clearTimeout(this._idleTimer);
+        clearTimeout(this._warningTimer);
+        clearInterval(this._countdownInterval);
+        const events = ['mousemove', 'keydown', 'touchstart', 'scroll', 'click'];
+        if (this._resetHandler) events.forEach(e => document.removeEventListener(e, this._resetHandler));
+        document.getElementById('session-timeout-overlay').style.display = 'none';
+    },
+
+    reset() {
+        if (!this._active) return;
+        clearTimeout(this._idleTimer);
+        clearTimeout(this._warningTimer);
+        clearInterval(this._countdownInterval);
+        document.getElementById('session-timeout-overlay').style.display = 'none';
+        this._scheduleTimers();
+    },
+
+    _scheduleTimers() {
+        this._warningTimer = setTimeout(() => this._showWarning(), this.WARNING_MS);
+        this._idleTimer = setTimeout(() => this._expire(), this.TIMEOUT_MS);
+    },
+
+    _showWarning() {
+        Logger.warn('auth', 'Session timeout warning shown');
+        const overlay = document.getElementById('session-timeout-overlay');
+        overlay.style.display = '';
+        let remaining = Math.round((this.TIMEOUT_MS - this.WARNING_MS) / 1000);
+        const countdown = document.getElementById('timeout-countdown');
+        countdown.textContent = this._formatTime(remaining);
+        this._countdownInterval = setInterval(() => {
+            remaining--;
+            countdown.textContent = this._formatTime(remaining);
+            if (remaining <= 0) clearInterval(this._countdownInterval);
+        }, 1000);
+    },
+
+    _expire() {
+        Logger.warn('auth', 'Session expired due to inactivity');
+        this.stop();
+        auth.signOut();
+        location.reload();
+    },
+
+    _formatTime(seconds) {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+};
+
 // ===== Auth UI Logic =====
 const Auth = {
     currentUser: null,
@@ -139,8 +210,23 @@ const Auth = {
 
         signoutBtn.addEventListener('click', async () => {
             Logger.info('auth', 'User signed out');
+            SessionTimer.stop();
             await auth.signOut();
             location.reload();
+        });
+
+        // Session timeout buttons
+        document.getElementById('btn-session-extend').addEventListener('click', () => SessionTimer.reset());
+        document.getElementById('btn-session-signout').addEventListener('click', async () => {
+            SessionTimer.stop();
+            await auth.signOut();
+            location.reload();
+        });
+
+        // Self-service onboarding
+        document.getElementById('btn-onboard-create').addEventListener('click', () => this._selfServiceOnboard());
+        document.getElementById('onboard-org-name').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') this._selfServiceOnboard();
         });
 
         // Auth state observer
@@ -254,6 +340,7 @@ const Auth = {
         document.getElementById('btn-add-staff').onclick = () => openStaffModal(null);
         document.getElementById('btn-add-survey').onclick = () => openSurveyModal(null);
         renderDashboard();
+        SessionTimer.start();
     },
 
     async switchOrg(orgId) {
@@ -305,5 +392,36 @@ const Auth = {
             'auth/network-request-failed': 'Network error. Check your connection.',
         };
         return messages[code] || 'Authentication error. Please try again.';
+    },
+
+    async _selfServiceOnboard() {
+        const nameInput = document.getElementById('onboard-org-name');
+        const name = nameInput.value.trim();
+        if (!name) {
+            nameInput.style.borderColor = 'var(--color-danger)';
+            nameInput.focus();
+            return;
+        }
+        const btn = document.getElementById('btn-onboard-create');
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+        try {
+            const email = this.currentUser.email.toLowerCase();
+            const orgId = await FirestoreStore.createOrg(name, email);
+            await UserManager.setRoleForOrg(email, orgId, 'admin');
+            await UserManager.loadUser(email);
+            Logger.info('auth', 'Self-service org created', { orgId, name, email });
+            document.getElementById('login-denied').style.display = 'none';
+            document.getElementById('login-gate').classList.add('hidden');
+            this.showUserInfo(this.currentUser);
+            this._currentOrgId = orgId;
+            this._currentRole = 'admin';
+            await this._initApp();
+        } catch (err) {
+            Logger.error('auth', 'Self-service onboarding failed', null, err);
+            btn.disabled = false;
+            btn.textContent = '🏢 Create';
+            alert('Failed to create organization: ' + err.message);
+        }
     }
 };

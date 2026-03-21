@@ -55,8 +55,17 @@
             </button>
 
             <div class="login-denied" id="login-denied" style="display:none;">
-                <p>⛔ Access denied. Your account is not authorized.</p>
-                <button class="btn btn-ghost" id="btn-signout-denied">Try another account</button>
+                <p>⛔ Your account is not yet assigned to an organization.</p>
+                <div id="onboarding-create" style="margin-top:16px;">
+                    <p style="color:var(--text-secondary);font-size:0.88rem;margin-bottom:10px;">Create your own organization to get started:</p>
+                    <div style="display:flex;gap:8px;">
+                        <input type="text" class="form-control" id="onboard-org-name" placeholder="Your organization name" style="flex:1;">
+                        <button class="btn btn-primary" id="btn-onboard-create">🏢 Create</button>
+                    </div>
+                </div>
+                <div style="margin-top:12px;">
+                    <button class="btn btn-ghost" id="btn-signout-denied">Try another account</button>
+                </div>
             </div>
             <p class="login-footer">Authorized IQMH personnel only</p>
         </div>
@@ -426,6 +435,52 @@
                     </div>
                 </div>
 
+                <!-- Org Branding (Admin+) -->
+                <div class="card" id="branding-card" style="display:none;">
+                    <div class="card-header">
+                        <h2>🎨 Organization Branding</h2>
+                        <p class="card-subtitle">Customize the look of LoadLevel for your organization.</p>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Display Name</label>
+                            <input type="text" class="form-control" id="branding-name" placeholder="Organization name">
+                        </div>
+                        <div class="form-group">
+                            <label>Accent Color</label>
+                            <div style="display:flex;gap:8px;align-items:center;">
+                                <input type="color" id="branding-color" value="#667eea" style="width:48px;height:36px;border:none;border-radius:6px;cursor:pointer;background:transparent;">
+                                <input type="text" class="form-control" id="branding-color-hex" placeholder="#667eea" style="flex:1;font-family:monospace;">
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:8px;">
+                        <button class="btn btn-primary" id="btn-save-branding">Save Branding</button>
+                        <button class="btn btn-ghost" id="btn-reset-branding">Reset to Default</button>
+                    </div>
+                </div>
+
+                <!-- Platform Overview (Super Admin only) -->
+                <div class="card" id="platform-overview-card" style="display:none;">
+                    <div class="card-header">
+                        <h2>📊 Platform Overview</h2>
+                        <p class="card-subtitle">Aggregate metrics across all organizations.</p>
+                    </div>
+                    <div class="stats-row" id="platform-stats"></div>
+                    <table class="data-table" id="platform-orgs-table">
+                        <thead>
+                            <tr>
+                                <th>Organization</th>
+                                <th>Users</th>
+                                <th>Surveys</th>
+                                <th>Staff</th>
+                                <th>Created</th>
+                            </tr>
+                        </thead>
+                        <tbody id="platform-orgs-body"></tbody>
+                    </table>
+                </div>
+
                 <!-- Org Management (Super Admin Only) -->
                 <div class="card" id="org-management-card" style="display:none;">
                     <div class="card-header">
@@ -490,6 +545,23 @@
             <div class="modal-footer" id="modal-footer">
                 <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
                 <button class="btn btn-primary" id="modal-save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Session Timeout Modal -->
+    <div class="modal-overlay" id="session-timeout-overlay" style="display:none;">
+        <div class="modal" style="max-width:400px;">
+            <div class="modal-header">
+                <h2>⏰ Session Expiring</h2>
+            </div>
+            <div class="modal-body" style="text-align:center;padding:24px;">
+                <p style="font-size:1.1rem;margin-bottom:8px;">Your session will expire in <strong id="timeout-countdown">5:00</strong></p>
+                <p style="color:var(--text-secondary);font-size:0.88rem;">You'll be signed out due to inactivity.</p>
+            </div>
+            <div class="modal-footer" style="justify-content:center;gap:12px;">
+                <button class="btn btn-primary" id="btn-session-extend">Stay Signed In</button>
+                <button class="btn btn-ghost" id="btn-session-signout">Sign Out</button>
             </div>
         </div>
     </div>

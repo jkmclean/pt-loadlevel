@@ -3,21 +3,16 @@
 ## 🔮 Future Vision
 
 ### SaaS Platform
-- [ ] **Self-service onboarding** — New PT organizations can sign up, create their org, and start configuring surveys without needing a Super Admin
-- [ ] **Branded experience** — Per-org logo, custom color accent, org name in header
+- [x] **Self-service onboarding** — New PT organizations can sign up, create their org, and start configuring surveys without needing a Super Admin
+- [x] **Branded experience** — Per-org display name, custom color accent
 - [ ] **Subscription tiers** — Free (1 org, 5 surveys), Pro (unlimited surveys, export), Enterprise (API access, SSO)
-- [ ] **Usage dashboard for Super Admins** — See all orgs, user counts, survey counts, activity metrics
+- [x] **Usage dashboard for Super Admins** — See all orgs, user counts, survey counts, activity metrics
 - [ ] **Billing integration** — Stripe for subscription management
 - [ ] **Custom domain support** — Orgs can use their own subdomain (e.g., `iqmh.loadlevel.app`)
 
 ---
 
 ## 📋 Planned Features
-
-### Data & Reporting
-- [ ] Historical snapshots — Save workload snapshots over time to track trends
-- [ ] PDF/Excel report export — Formatted reports for management review
-- [ ] Audit log — Track who changed what and when
 
 ### Collaboration
 - [ ] Comments/notes on surveys — Staff can annotate surveys with context
@@ -31,7 +26,6 @@
 ### Auth & Security
 - [ ] SSO / SAML support for enterprise orgs
 - [ ] Cloud Functions for server-side role enforcement in Firestore rules
-- [ ] Session timeout / forced re-auth
 
 ---
 
@@ -44,3 +38,12 @@
 - [x] Central Firestore database (real-time sync)
 - [x] Multi-tenant organization support with org picker
 - [x] AI steward governance (AGENTS.md + BUSINESS_RULES.md)
+- [x] Centralized logging & observability (logger.js)
+- [x] Audit log with Activity Log panel
+- [x] PDF/Excel report export
+- [x] Historical snapshots with trend chart
+- [x] Self-service onboarding
+- [x] Per-org branding (display name, accent color)
+- [x] Super Admin usage dashboard
+- [x] Session timeout (30 min idle, 5 min warning)
+
