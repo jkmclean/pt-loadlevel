@@ -474,6 +474,13 @@ body {
     margin-top: 3px;
 }
 
+/* ===== Snapshot History ===== */
+.snapshot-history {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
 /* ===== Tables ===== */
 .data-table {
     width: 100%;

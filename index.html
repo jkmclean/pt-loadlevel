@@ -192,6 +192,39 @@
                 </div>
             </div>
 
+            <!-- Workload Trend -->
+            <div class="card" id="trend-card">
+                <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                    <h2>📈 Workload Trend</h2>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button class="btn btn-sm btn-primary" id="btn-take-snapshot">📸 Take Snapshot</button>
+                        <button class="btn btn-sm btn-ghost" id="btn-toggle-snapshots" style="display:none;">History ▾</button>
+                    </div>
+                </div>
+                <div id="trend-content">
+                    <div class="empty-state" id="trend-empty">Take your first snapshot to start tracking workload trends over time.</div>
+                    <div class="chart-container" id="trend-chart-container" style="display:none;height:260px;">
+                        <canvas id="chart-trend"></canvas>
+                    </div>
+                </div>
+                <div class="snapshot-history" id="snapshot-history" style="display:none;">
+                    <table class="data-table" id="snapshot-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Label</th>
+                                <th>Staff</th>
+                                <th>Surveys</th>
+                                <th>Avg Workload</th>
+                                <th>Imbalance</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="snapshot-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- What-If Simulator Panel (hidden by default) -->
             <div class="card what-if-panel" id="what-if-panel" style="display:none;">
                 <div class="card-header">

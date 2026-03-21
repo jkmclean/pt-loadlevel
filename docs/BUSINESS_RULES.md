@@ -39,6 +39,7 @@
 | **BR-D7** | Real-time listeners (`onSnapshot`) must be used for all org data collections |
 | **BR-D8** | All data mutations must write an audit log entry via `FirestoreStore.writeAuditEntry()` |
 | **BR-D9** | Audit log entries are immutable — they cannot be edited or deleted by any role |
+| **BR-D10** | Snapshots are immutable records; only Admin+ can delete them |
 
 ## Authentication
 

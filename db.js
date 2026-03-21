@@ -159,6 +159,62 @@ const FirestoreStore = {
         return entries;
     },
 
+    // ===== Snapshots =====
+
+    async takeSnapshot(label) {
+        if (!this._orgId) throw new Error('No org loaded');
+        const user = (typeof Auth !== 'undefined' && Auth.currentUser)
+            ? Auth.currentUser.email.toLowerCase() : 'system';
+
+        const staffScores = this._cache.staff.map(s => {
+            const score = Math.round(Scoring.staffWorkload(s.id));
+            const level = Scoring.loadLevel(score, this._cache.staff.length);
+            return { name: s.name, score, level: Scoring.loadLevelLabel(level) };
+        }).sort((a, b) => b.score - a.score);
+
+        const scores = staffScores.map(s => s.score);
+        const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+
+        const snapshot = {
+            label: label || new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
+            timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+            takenBy: user,
+            stats: {
+                staffCount: this._cache.staff.length,
+                surveyCount: this._cache.surveys.length,
+                avgWorkload: avg,
+                imbalanceIndex: Scoring.imbalanceIndex()
+            },
+            staffScores
+        };
+
+        const docRef = await db.collection('organizations').doc(this._orgId)
+            .collection('snapshots').add(snapshot);
+        this.writeAuditEntry('snapshot.taken', { label: snapshot.label });
+        Logger.info('db', 'Snapshot taken', { id: docRef.id, label: snapshot.label });
+        return docRef.id;
+    },
+
+    async getSnapshots(limit = 50) {
+        if (!this._orgId) return [];
+        const snap = await db.collection('organizations').doc(this._orgId)
+            .collection('snapshots')
+            .orderBy('timestamp', 'desc')
+            .limit(limit)
+            .get();
+        const entries = [];
+        snap.forEach(doc => entries.push({ id: doc.id, ...doc.data() }));
+        return entries;
+    },
+
+    async deleteSnapshot(id) {
+        if (!this._orgId) throw new Error('No org loaded');
+        await db.collection('organizations').doc(this._orgId)
+            .collection('snapshots').doc(id).delete();
+        this.writeAuditEntry('snapshot.deleted', { id });
+        Logger.info('db', 'Snapshot deleted', { id });
+    },
+
     // ===== Survey CRUD =====
 
     async addSurvey(data) {

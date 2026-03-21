@@ -83,6 +83,7 @@ Final score = weighted sum of all 6 dimensions (weights configurable via Setting
 - Users have a `/users/{email}` doc with an `organizations` array: `[{orgId, role}]`
 - Super Admins are tracked in a separate `/superAdmins/{email}` collection
 - Each org has an `auditLog` subcollection for immutable activity tracking
+- Each org has a `snapshots` subcollection for historical workload captures
 - The org picker in the sidebar lets users switch between their orgs
 - Switching orgs unsubscribes old listeners and subscribes to the new org's data
 

@@ -74,6 +74,7 @@ function renderDashboard() {
     renderWorkloadChart();
     renderRadarChart();
     renderHotspots();
+    renderTrendSection();
 }
 
 function renderWorkloadChart() {
@@ -583,6 +584,13 @@ function initSettings() {
     };
     document.getElementById('btn-export-pdf').onclick = exportPDF;
     document.getElementById('btn-export-excel').onclick = exportExcel;
+    document.getElementById('btn-take-snapshot').onclick = takeSnapshotPrompt;
+    document.getElementById('btn-toggle-snapshots').onclick = () => {
+        const hist = document.getElementById('snapshot-history');
+        const btn = document.getElementById('btn-toggle-snapshots');
+        if (hist.style.display === 'none') { hist.style.display = ''; btn.textContent = 'History ▴'; }
+        else { hist.style.display = 'none'; btn.textContent = 'History ▾'; }
+    };
     document.getElementById('btn-import-data').onclick = () => document.getElementById('import-file-input').click();
     document.getElementById('import-file-input').onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;
@@ -601,6 +609,138 @@ function updateWeightTotal() {
     const el = document.getElementById('weight-total');
     el.innerHTML = `Total: <strong>${total}%</strong>${total !== 100 ? ' <span style="color:var(--color-danger);">⚠️ Should be 100%</span>' : ' ✅'}`;
     el.className = 'weight-total' + (total !== 100 ? ' invalid' : '');
+}
+
+// ===== Workload Trend =====
+let trendChart = null;
+let _snapshotsCache = null;
+
+async function renderTrendSection() {
+    try {
+        const snapshots = await FirestoreStore.getSnapshots(50);
+        _snapshotsCache = snapshots;
+        const toggleBtn = document.getElementById('btn-toggle-snapshots');
+
+        if (snapshots.length === 0) {
+            document.getElementById('trend-empty').style.display = '';
+            document.getElementById('trend-chart-container').style.display = 'none';
+            toggleBtn.style.display = 'none';
+            return;
+        }
+
+        document.getElementById('trend-empty').style.display = 'none';
+        toggleBtn.style.display = '';
+
+        if (snapshots.length >= 2) {
+            document.getElementById('trend-chart-container').style.display = '';
+            renderTrendChart(snapshots);
+        } else {
+            document.getElementById('trend-chart-container').style.display = 'none';
+        }
+
+        renderSnapshotHistory(snapshots);
+    } catch (err) {
+        Logger.error('ui', 'Trend section render failed', null, err);
+    }
+}
+
+function renderTrendChart(snapshots) {
+    const ctx = document.getElementById('chart-trend').getContext('2d');
+    const reversed = [...snapshots].reverse(); // oldest first for X axis
+    const labels = reversed.map(s => s.label || '');
+    const chartColors = ['#667eea', '#764ba2', '#2ecc71', '#f39c12', '#e74c3c', '#3498db', '#e67e22', '#1abc9c'];
+
+    // Collect all unique staff names across snapshots
+    const staffNames = new Set();
+    reversed.forEach(s => (s.staffScores || []).forEach(ss => staffNames.add(ss.name)));
+    const nameArr = [...staffNames];
+
+    // One dataset per staff member
+    const datasets = nameArr.map((name, i) => ({
+        label: name,
+        data: reversed.map(s => {
+            const match = (s.staffScores || []).find(ss => ss.name === name);
+            return match ? match.score : null;
+        }),
+        borderColor: chartColors[i % chartColors.length],
+        backgroundColor: chartColors[i % chartColors.length] + '22',
+        borderWidth: 2,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        tension: 0.3,
+        spanGaps: true
+    }));
+
+    // Add average line
+    datasets.push({
+        label: 'Average',
+        data: reversed.map(s => s.stats?.avgWorkload || 0),
+        borderColor: '#8b92a8',
+        borderDash: [6, 4],
+        borderWidth: 2,
+        pointRadius: 3,
+        tension: 0.3,
+        fill: false
+    });
+
+    if (trendChart) trendChart.destroy();
+    trendChart = new Chart(ctx, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom', labels: { color: '#8b92a8', padding: 10, usePointStyle: true, font: { size: 10 } } },
+                tooltip: { backgroundColor: '#1a1d2e', borderColor: '#2a3050', borderWidth: 1, titleColor: '#e8ecf4', bodyColor: '#8b92a8', padding: 12, cornerRadius: 8 }
+            },
+            scales: {
+                y: { beginAtZero: true, grid: { color: '#2a305044' }, ticks: { color: '#8b92a8' } },
+                x: { grid: { display: false }, ticks: { color: '#8b92a8', font: { size: 9 } } }
+            }
+        }
+    });
+}
+
+function renderSnapshotHistory(snapshots) {
+    const tbody = document.getElementById('snapshot-table-body');
+    const canDelete = Roles.canEditData(Auth._currentRole);
+    tbody.innerHTML = snapshots.map(s => {
+        const date = s.timestamp?.toDate ? s.timestamp.toDate().toLocaleDateString() : '';
+        return `<tr>
+            <td>${date}</td>
+            <td>${s.label || ''}</td>
+            <td>${s.stats?.staffCount || 0}</td>
+            <td>${s.stats?.surveyCount || 0}</td>
+            <td>${s.stats?.avgWorkload || 0}</td>
+            <td>${s.stats?.imbalanceIndex || 0}%</td>
+            <td>${canDelete ? `<button class="btn-action danger" onclick="deleteSnapshot('${s.id}')" title="Delete snapshot">\ud83d\uddd1\ufe0f</button>` : ''}</td>
+        </tr>`;
+    }).join('');
+}
+
+async function takeSnapshotPrompt() {
+    const label = prompt('Snapshot label (optional):', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }));
+    if (label === null) return; // cancelled
+    try {
+        await FirestoreStore.takeSnapshot(label);
+        showToast('Snapshot saved', 'success');
+        await renderTrendSection();
+    } catch (err) {
+        Logger.error('ui', 'Snapshot failed', null, err);
+        showToast('Failed to save snapshot: ' + err.message, 'error');
+    }
+}
+
+async function deleteSnapshot(id) {
+    if (!confirm('Delete this snapshot? This cannot be undone.')) return;
+    try {
+        await FirestoreStore.deleteSnapshot(id);
+        showToast('Snapshot deleted', 'info');
+        await renderTrendSection();
+    } catch (err) {
+        Logger.error('ui', 'Snapshot delete failed', { id }, err);
+        showToast('Failed to delete snapshot: ' + err.message, 'error');
+    }
 }
 
 // ===== Report Export =====
@@ -796,6 +936,8 @@ const AUDIT_ACTION_META = {
     'user.removed':      { icon: '🚫', verb: 'removed user' },
     'org.created':       { icon: '🏢', verb: 'created organization' },
     'org.deleted':       { icon: '🗑️', verb: 'deleted organization' },
+    'snapshot.taken':    { icon: '📸', verb: 'took snapshot' },
+    'snapshot.deleted':  { icon: '🗑️', verb: 'deleted snapshot' },
 };
 
 function _auditDetailsText(action, details) {
