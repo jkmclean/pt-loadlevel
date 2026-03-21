@@ -20,7 +20,8 @@ index.html
   ├── auth.js             (loaded third — Firebase init + auth)
   │   ├── firebase config + init
   │   ├── Roles            — permission check functions
-  │   └── Auth             — sign-in flow, org selection, role resolution
+  │   ├── Auth             — sign-in flow (redirect), org selection, role resolution
+  │   └── SessionTimer     — 30-min idle timeout with 5-min warning
   ├── app.js              (loaded fourth — Store + Scoring)
   │   ├── Store            — thin async wrapper around FirestoreStore
   │   ├── CATEGORIES       — 6 scoring dimension names
@@ -31,6 +32,8 @@ index.html
       ├── renderAssignments, What-If Simulator
       ├── renderOrgPicker, renderOrgManagement
       ├── renderUserManagement, renderSettings
+      ├── applyOrgBranding, renderBrandingSettings
+      ├── renderPlatformOverview (Super Admin)
       └── applyRoleRestrictions
 ```
 
@@ -50,17 +53,23 @@ User Action (click, slider, etc.)
 
 ```
 1. User visits site → login-gate shown
-2. Signs in via Email/Password OR Google
+2. Signs in via Email/Password OR Google (redirect flow)
 3. auth.onAuthStateChanged fires
 4. UserManager.seedSuperAdmin() — first user ever becomes Super Admin
 5. UserManager.loadUser(email) — loads /users/{email} doc
 6. Check: Super Admin? → access granted
    Check: Has orgs? → access granted, load first org
-   Neither? → "Access Denied"
+   Neither? → show self-service onboarding (create org)
 7. FirestoreStore.loadOrg(orgId) — subscribes to org's data
 8. applyRoleRestrictions() — gates UI by role
-9. renderDashboard() — shows data
+9. applyOrgBranding() — applies org display name + accent color
+10. renderDashboard() — shows data
+11. SessionTimer.start() — begins 30-min idle timeout
 ```
+
+> **Note:** Google Sign-In uses `signInWithRedirect` (not popup) to avoid
+> Cross-Origin-Opener-Policy blocking in modern browsers. Each auth step
+> is individually try-caught for resilience against Edge tracking prevention.
 
 ## Scoring Engine
 
@@ -84,8 +93,11 @@ Final score = weighted sum of all 6 dimensions (weights configurable via Setting
 - Super Admins are tracked in a separate `/superAdmins/{email}` collection
 - Each org has an `auditLog` subcollection for immutable activity tracking
 - Each org has a `snapshots` subcollection for historical workload captures
+- Each org has a `branding` field: `{ displayName, accentColor, logoUrl }`
 - The org picker in the sidebar lets users switch between their orgs
 - Switching orgs unsubscribes old listeners and subscribes to the new org's data
+- Self-service onboarding: new users without orgs can create their own
+- Super Admins can view platform-wide stats across all orgs
 
 ## Key Design Decisions
 
