@@ -37,6 +37,8 @@
 | **BR-D5** | Assignments map is stored as a **single Firestore document** (not individual docs per assignment) |
 | **BR-D6** | User profiles are stored at `/users/{email}` with an `organizations` array |
 | **BR-D7** | Real-time listeners (`onSnapshot`) must be used for all org data collections |
+| **BR-D8** | All data mutations must write an audit log entry via `FirestoreStore.writeAuditEntry()` |
+| **BR-D9** | Audit log entries are immutable — they cannot be edited or deleted by any role |
 
 ## Authentication
 

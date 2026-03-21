@@ -54,6 +54,7 @@ function refreshCurrentPanel(panel) {
         case 'staff': renderStaffTable(); break;
         case 'surveys': renderSurveysTable(); break;
         case 'assignments': renderAssignments(); break;
+        case 'activity': renderActivityLog(); break;
         case 'settings': renderSettings(); break;
     }
 }
@@ -598,6 +599,89 @@ function updateWeightTotal() {
     const el = document.getElementById('weight-total');
     el.innerHTML = `Total: <strong>${total}%</strong>${total !== 100 ? ' <span style="color:var(--color-danger);">⚠️ Should be 100%</span>' : ' ✅'}`;
     el.className = 'weight-total' + (total !== 100 ? ' invalid' : '');
+}
+
+// ===== Activity Log =====
+const AUDIT_ACTION_META = {
+    'survey.created':    { icon: '📋', verb: 'created survey' },
+    'survey.updated':    { icon: '✏️', verb: 'updated survey' },
+    'survey.deleted':    { icon: '🗑️', verb: 'deleted survey' },
+    'staff.created':     { icon: '👤', verb: 'added staff member' },
+    'staff.updated':     { icon: '✏️', verb: 'updated staff member' },
+    'staff.deleted':     { icon: '🗑️', verb: 'removed staff member' },
+    'assignment.changed':{ icon: '🔗', verb: 'changed assignment' },
+    'weights.updated':   { icon: '⚖️', verb: 'updated category weights' },
+    'data.cleared':      { icon: '🧹', verb: 'cleared all data' },
+    'data.sampleLoaded': { icon: '🔄', verb: 'loaded sample data' },
+    'data.imported':     { icon: '📤', verb: 'imported data' },
+    'user.roleChanged':  { icon: '🔐', verb: 'changed user role' },
+    'user.removed':      { icon: '🚫', verb: 'removed user' },
+    'org.created':       { icon: '🏢', verb: 'created organization' },
+    'org.deleted':       { icon: '🗑️', verb: 'deleted organization' },
+};
+
+function _auditDetailsText(action, details) {
+    if (!details) return '';
+    switch (action) {
+        case 'survey.created': case 'survey.updated': case 'survey.deleted':
+            return details.name ? `"${details.name}"${details.code ? ` (${details.code})` : ''}` : '';
+        case 'staff.created': case 'staff.updated': case 'staff.deleted':
+            return details.name ? `"${details.name}"${details.role ? ` — ${details.role}` : ''}` : '';
+        case 'assignment.changed':
+            return `${details.survey || '?'}: ${details.from} → ${details.to}`;
+        case 'data.sampleLoaded': case 'data.imported':
+            return `${details.surveyCount || details.surveys || 0} surveys, ${details.staffCount || details.staff || 0} staff`;
+        case 'user.roleChanged':
+            return `${details.email} → ${details.role}`;
+        case 'user.removed':
+            return details.email || '';
+        default:
+            return '';
+    }
+}
+
+function _relativeTime(timestamp) {
+    if (!timestamp) return '';
+    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp.seconds * 1000);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 1) return 'just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return date.toLocaleDateString();
+}
+
+async function renderActivityLog() {
+    const feed = document.getElementById('activity-feed');
+    feed.innerHTML = '<div class="empty-state">Loading activity...</div>';
+    try {
+        const entries = await FirestoreStore.getAuditLog(100);
+        if (entries.length === 0) {
+            feed.innerHTML = '<div class="empty-state">No activity recorded yet. Actions like creating surveys and staff will appear here.</div>';
+            return;
+        }
+        feed.innerHTML = entries.map(e => {
+            const meta = AUDIT_ACTION_META[e.action] || { icon: '📝', verb: e.action };
+            const detail = _auditDetailsText(e.action, e.details);
+            const time = _relativeTime(e.timestamp);
+            return `<div class="activity-entry">
+                <div class="activity-icon">${meta.icon}</div>
+                <div class="activity-body">
+                    <div class="activity-text">
+                        <strong>${e.user || 'system'}</strong> ${meta.verb}${detail ? ` — <span class="activity-detail">${detail}</span>` : ''}
+                    </div>
+                    <div class="activity-time">${time}</div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        Logger.error('ui', 'Activity log render failed', null, err);
+        feed.innerHTML = '<div class="empty-state">Failed to load activity log.</div>';
+    }
 }
 
 // ===== Role-Based UI Gating =====

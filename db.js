@@ -131,12 +131,41 @@ const FirestoreStore = {
         this._listeners = [];
     },
 
+    // ===== Audit Log =====
+
+    writeAuditEntry(action, details) {
+        if (!this._orgId) return;
+        const user = (typeof Auth !== 'undefined' && Auth.currentUser)
+            ? Auth.currentUser.email.toLowerCase()
+            : 'system';
+        db.collection('organizations').doc(this._orgId)
+            .collection('auditLog').add({
+                action,
+                user,
+                timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+                details: details || {}
+            }).catch(err => Logger.error('db', 'Audit write failed', { action }, err));
+    },
+
+    async getAuditLog(limit = 100) {
+        if (!this._orgId) return [];
+        const snap = await db.collection('organizations').doc(this._orgId)
+            .collection('auditLog')
+            .orderBy('timestamp', 'desc')
+            .limit(limit)
+            .get();
+        const entries = [];
+        snap.forEach(doc => entries.push({ id: doc.id, ...doc.data() }));
+        return entries;
+    },
+
     // ===== Survey CRUD =====
 
     async addSurvey(data) {
         if (!this._orgId) throw new Error('No org loaded');
         const docRef = await db.collection('organizations').doc(this._orgId)
             .collection('surveys').add(data);
+        this.writeAuditEntry('survey.created', { id: docRef.id, name: data.name, code: data.code });
         return docRef.id;
     },
 
@@ -144,14 +173,17 @@ const FirestoreStore = {
         if (!this._orgId) throw new Error('No org loaded');
         await db.collection('organizations').doc(this._orgId)
             .collection('surveys').doc(surveyId).update(data);
+        this.writeAuditEntry('survey.updated', { id: surveyId, name: data.name, code: data.code });
     },
 
     async removeSurvey(surveyId) {
         if (!this._orgId) throw new Error('No org loaded');
+        const survey = this._cache.surveys.find(s => s.id === surveyId);
         await db.collection('organizations').doc(this._orgId)
             .collection('surveys').doc(surveyId).delete();
         // Also remove assignment
         await this.assign(surveyId, null);
+        this.writeAuditEntry('survey.deleted', { id: surveyId, name: survey?.name });
     },
 
     // ===== Staff CRUD =====
@@ -160,6 +192,7 @@ const FirestoreStore = {
         if (!this._orgId) throw new Error('No org loaded');
         const docRef = await db.collection('organizations').doc(this._orgId)
             .collection('staff').add(data);
+        this.writeAuditEntry('staff.created', { id: docRef.id, name: data.name, role: data.role });
         return docRef.id;
     },
 
@@ -167,10 +200,12 @@ const FirestoreStore = {
         if (!this._orgId) throw new Error('No org loaded');
         await db.collection('organizations').doc(this._orgId)
             .collection('staff').doc(staffId).update(data);
+        this.writeAuditEntry('staff.updated', { id: staffId, name: data.name, role: data.role });
     },
 
     async removeStaff(staffId) {
         if (!this._orgId) throw new Error('No org loaded');
+        const staff = this._cache.staff.find(s => s.id === staffId);
         await db.collection('organizations').doc(this._orgId)
             .collection('staff').doc(staffId).delete();
         // Remove any assignments pointing to this staff
@@ -183,6 +218,7 @@ const FirestoreStore = {
             await db.collection('organizations').doc(this._orgId)
                 .collection('settings').doc('assignments').set(updated);
         }
+        this.writeAuditEntry('staff.deleted', { id: staffId, name: staff?.name });
     },
 
     // ===== Assignments =====
@@ -191,11 +227,19 @@ const FirestoreStore = {
         if (!this._orgId) throw new Error('No org loaded');
         const ref = db.collection('organizations').doc(this._orgId)
             .collection('settings').doc('assignments');
+        const survey = this._cache.surveys.find(s => s.id === surveyId);
+        const prevStaff = this._cache.staff.find(s => s.id === this._cache.assignments[surveyId]);
+        const newStaff = this._cache.staff.find(s => s.id === staffId);
         if (staffId) {
             await ref.set({ [surveyId]: staffId }, { merge: true });
         } else {
             await ref.update({ [surveyId]: firebase.firestore.FieldValue.delete() });
         }
+        this.writeAuditEntry('assignment.changed', {
+            survey: survey?.name || surveyId,
+            from: prevStaff?.name || 'Unassigned',
+            to: newStaff?.name || 'Unassigned'
+        });
     },
 
     // ===== Weights =====
@@ -204,6 +248,7 @@ const FirestoreStore = {
         if (!this._orgId) throw new Error('No org loaded');
         await db.collection('organizations').doc(this._orgId)
             .collection('settings').doc('weights').set(weights);
+        this.writeAuditEntry('weights.updated', weights);
     },
 
     // ===== Bulk Operations =====
@@ -225,6 +270,7 @@ const FirestoreStore = {
         // Reset assignments and weights
         await orgRef.collection('settings').doc('assignments').set({});
         await orgRef.collection('settings').doc('weights').set(this.defaultWeights());
+        this.writeAuditEntry('data.cleared', {});
     },
 
     async loadSampleData() {
@@ -277,6 +323,7 @@ const FirestoreStore = {
             }
         });
         await orgRef.collection('settings').doc('assignments').set(assignments);
+        this.writeAuditEntry('data.sampleLoaded', { surveyCount: surveys.length, staffCount: staffData.length });
     },
 
     // ===== Export / Import =====
@@ -323,6 +370,10 @@ const FirestoreStore = {
         if (data.weights) {
             await orgRef.collection('settings').doc('weights').set(data.weights);
         }
+        this.writeAuditEntry('data.imported', {
+            surveys: (data.surveys || []).length,
+            staff: (data.staff || []).length
+        });
     }
 };
 
@@ -376,6 +427,7 @@ const UserManager = {
             orgs.push({ orgId, role });
         }
         await docRef.set({ organizations: orgs, lastUpdated: new Date().toISOString() }, { merge: true });
+        FirestoreStore.writeAuditEntry('user.roleChanged', { email: lower, role });
     },
 
     async removeUserFromOrg(email, orgId) {
@@ -386,6 +438,7 @@ const UserManager = {
         let orgs = doc.data().organizations || [];
         orgs = orgs.filter(o => o.orgId !== orgId);
         await docRef.update({ organizations: orgs });
+        FirestoreStore.writeAuditEntry('user.removed', { email: lower });
     },
 
     async listOrgUsers(orgId) {

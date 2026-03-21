@@ -91,6 +91,10 @@
                 <span class="nav-icon">🔗</span>
                 <span class="nav-label">Assignments</span>
             </button>
+            <button class="nav-item" data-panel="activity" id="nav-activity">
+                <span class="nav-icon">📜</span>
+                <span class="nav-label">Activity Log</span>
+            </button>
             <button class="nav-item" data-panel="settings" id="nav-settings">
                 <span class="nav-icon">⚙️</span>
                 <span class="nav-label">Settings</span>
@@ -288,6 +292,19 @@
                 <div class="card workload-preview-card" id="workload-preview-card">
                     <h3>Live Workload Preview</h3>
                     <div id="workload-preview-bars"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== ACTIVITY LOG PANEL ==================== -->
+        <section class="panel" id="panel-activity">
+            <div class="panel-header">
+                <h1>Activity Log</h1>
+                <p class="panel-subtitle">Recent changes across this organization.</p>
+            </div>
+            <div class="card">
+                <div class="activity-feed" id="activity-feed">
+                    <div class="empty-state">Loading activity...</div>
                 </div>
             </div>
         </section>
