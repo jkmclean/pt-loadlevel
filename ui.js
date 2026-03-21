@@ -581,6 +581,8 @@ function initSettings() {
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'loadlevel-data.json'; a.click();
         showToast('Data exported', 'success');
     };
+    document.getElementById('btn-export-pdf').onclick = exportPDF;
+    document.getElementById('btn-export-excel').onclick = exportExcel;
     document.getElementById('btn-import-data').onclick = () => document.getElementById('import-file-input').click();
     document.getElementById('import-file-input').onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;
@@ -599,6 +601,182 @@ function updateWeightTotal() {
     const el = document.getElementById('weight-total');
     el.innerHTML = `Total: <strong>${total}%</strong>${total !== 100 ? ' <span style="color:var(--color-danger);">⚠️ Should be 100%</span>' : ' ✅'}`;
     el.className = 'weight-total' + (total !== 100 ? ' invalid' : '');
+}
+
+// ===== Report Export =====
+
+function _getReportData() {
+    const staffData = Store.staff.map(s => {
+        const score = Math.round(Scoring.staffWorkload(s.id));
+        const level = Scoring.loadLevel(score, Store.staff.length);
+        const assignedSurveys = Store.surveys.filter(sv => Store.assignments[sv.id] === s.id);
+        const breakdown = Scoring.staffCategoryBreakdown(s.id);
+        return { name: s.name, role: s.role, surveys: assignedSurveys.length, score, level: Scoring.loadLevelLabel(level), breakdown };
+    }).sort((a, b) => b.score - a.score);
+
+    const surveyData = Store.surveys.map(sv => {
+        const assignee = Store.staff.find(s => s.id === Store.assignments[sv.id]);
+        return { name: sv.name, code: sv.code || '', type: sv.surveyType || 'quantitative', score: Math.round(Scoring.surveyScore(sv)), assignedTo: assignee?.name || 'Unassigned' };
+    }).sort((a, b) => b.score - a.score);
+
+    const scores = Store.staff.map(s => Scoring.staffWorkload(s.id));
+    const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+
+    return {
+        orgName: document.querySelector('.brand-text')?.textContent || 'LoadLevel',
+        date: new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }),
+        user: Auth.currentUser?.email || 'unknown',
+        stats: { staff: Store.staff.length, surveys: Store.surveys.length, avgWorkload: avg, imbalance: Scoring.imbalanceIndex() },
+        staffData,
+        surveyData
+    };
+}
+
+function exportPDF() {
+    try {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('landscape', 'mm', 'a4');
+        const data = _getReportData();
+        const pageW = doc.internal.pageSize.getWidth();
+
+        // --- Header ---
+        doc.setFillColor(11, 14, 23);
+        doc.rect(0, 0, pageW, 28, 'F');
+        doc.setTextColor(102, 126, 234);
+        doc.setFontSize(18);
+        doc.setFont('helvetica', 'bold');
+        doc.text('LoadLevel — Workload Report', 14, 14);
+        doc.setFontSize(9);
+        doc.setTextColor(139, 146, 168);
+        doc.text(`${data.date}  •  ${data.user}`, 14, 22);
+
+        // --- Summary Stats ---
+        let y = 36;
+        doc.setTextColor(232, 236, 244);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Summary', 14, y);
+        y += 6;
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(139, 146, 168);
+        doc.text(`Staff: ${data.stats.staff}   |   Surveys: ${data.stats.surveys}   |   Avg Workload: ${data.stats.avgWorkload}   |   Imbalance Index: ${data.stats.imbalance}%`, 14, y);
+
+        // --- Staff Workload Table ---
+        y += 10;
+        doc.setTextColor(232, 236, 244);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Staff Workload', 14, y);
+        y += 2;
+
+        doc.autoTable({
+            startY: y,
+            head: [['Name', 'Role', 'Surveys', 'Score', 'Level', ...CATEGORIES.map(c => CATEGORY_LABELS[c])]],
+            body: data.staffData.map(s => [
+                s.name, s.role, s.surveys, s.score, s.level,
+                ...CATEGORIES.map(c => Math.round(s.breakdown[c]))
+            ]),
+            theme: 'grid',
+            headStyles: { fillColor: [22, 27, 46], textColor: [139, 146, 168], fontSize: 7, fontStyle: 'bold' },
+            bodyStyles: { fillColor: [17, 21, 37], textColor: [232, 236, 244], fontSize: 8 },
+            alternateRowStyles: { fillColor: [22, 27, 46] },
+            styles: { cellPadding: 3, lineColor: [42, 48, 80], lineWidth: 0.25 },
+            columnStyles: { 3: { halign: 'center', fontStyle: 'bold' }, 4: { halign: 'center' } },
+            margin: { left: 14 }
+        });
+
+        // --- Survey Inventory ---
+        y = doc.lastAutoTable.finalY + 12;
+
+        // Check if we need a new page
+        if (y > doc.internal.pageSize.getHeight() - 30) {
+            doc.addPage();
+            y = 20;
+        }
+
+        doc.setTextColor(232, 236, 244);
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Survey Inventory', 14, y);
+        y += 2;
+
+        doc.autoTable({
+            startY: y,
+            head: [['Survey Name', 'Code', 'Type', 'Complexity', 'Assigned To']],
+            body: data.surveyData.map(s => [s.name, s.code, s.type, s.score, s.assignedTo]),
+            theme: 'grid',
+            headStyles: { fillColor: [22, 27, 46], textColor: [139, 146, 168], fontSize: 7, fontStyle: 'bold' },
+            bodyStyles: { fillColor: [17, 21, 37], textColor: [232, 236, 244], fontSize: 8 },
+            alternateRowStyles: { fillColor: [22, 27, 46] },
+            styles: { cellPadding: 3, lineColor: [42, 48, 80], lineWidth: 0.25 },
+            columnStyles: { 3: { halign: 'center', fontStyle: 'bold' } },
+            margin: { left: 14 }
+        });
+
+        // --- Footer on each page ---
+        const pageCount = doc.internal.getNumberOfPages();
+        for (let i = 1; i <= pageCount; i++) {
+            doc.setPage(i);
+            doc.setFontSize(7);
+            doc.setTextColor(90, 97, 120);
+            doc.text(`Page ${i} of ${pageCount}  •  Generated by LoadLevel`, pageW - 14, doc.internal.pageSize.getHeight() - 8, { align: 'right' });
+        }
+
+        doc.save(`LoadLevel_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+        showToast('PDF report exported', 'success');
+        Logger.info('ui', 'PDF report exported', { staff: data.stats.staff, surveys: data.stats.surveys });
+    } catch (err) {
+        Logger.error('ui', 'PDF export failed', null, err);
+        showToast('Failed to export PDF: ' + err.message, 'error');
+    }
+}
+
+function exportExcel() {
+    try {
+        const data = _getReportData();
+        const wb = XLSX.utils.book_new();
+
+        // Sheet 1: Summary
+        const summaryRows = [
+            ['LoadLevel — Workload Report'],
+            ['Generated', data.date],
+            ['By', data.user],
+            [],
+            ['Summary'],
+            ['Total Staff', data.stats.staff],
+            ['Total Surveys', data.stats.surveys],
+            ['Avg Workload', data.stats.avgWorkload],
+            ['Imbalance Index', data.stats.imbalance + '%'],
+        ];
+        const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+        wsSummary['!cols'] = [{ wch: 18 }, { wch: 30 }];
+        XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary');
+
+        // Sheet 2: Staff Workload
+        const staffHeaders = ['Name', 'Role', 'Assigned Surveys', 'Workload Score', 'Load Level', ...CATEGORIES.map(c => CATEGORY_LABELS[c])];
+        const staffRows = data.staffData.map(s => [
+            s.name, s.role, s.surveys, s.score, s.level,
+            ...CATEGORIES.map(c => Math.round(s.breakdown[c]))
+        ]);
+        const wsStaff = XLSX.utils.aoa_to_sheet([staffHeaders, ...staffRows]);
+        wsStaff['!cols'] = staffHeaders.map((_, i) => ({ wch: i === 0 ? 22 : i === 1 ? 20 : 16 }));
+        XLSX.utils.book_append_sheet(wb, wsStaff, 'Staff Workload');
+
+        // Sheet 3: Surveys
+        const surveyHeaders = ['Survey Name', 'Code', 'Type', 'Complexity Score', 'Assigned To'];
+        const surveyRows = data.surveyData.map(s => [s.name, s.code, s.type, s.score, s.assignedTo]);
+        const wsSurveys = XLSX.utils.aoa_to_sheet([surveyHeaders, ...surveyRows]);
+        wsSurveys['!cols'] = [{ wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 22 }];
+        XLSX.utils.book_append_sheet(wb, wsSurveys, 'Surveys');
+
+        XLSX.writeFile(wb, `LoadLevel_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        showToast('Excel report exported', 'success');
+        Logger.info('ui', 'Excel report exported', { staff: data.stats.staff, surveys: data.stats.surveys });
+    } catch (err) {
+        Logger.error('ui', 'Excel export failed', null, err);
+        showToast('Failed to export Excel: ' + err.message, 'error');
+    }
 }
 
 // ===== Activity Log =====

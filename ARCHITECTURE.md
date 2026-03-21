@@ -4,6 +4,8 @@
 
 LoadLevel is a single-page app (SPA) with no build step — vanilla HTML/CSS/JS served statically. All state lives in Firestore with real-time `onSnapshot` listeners for instant multi-user sync.
 
+**External dependencies (CDN):** Firebase SDK, Chart.js, jsPDF + AutoTable (PDF export), SheetJS (Excel export).
+
 ## File Dependency Graph
 
 ```
