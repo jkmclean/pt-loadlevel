@@ -216,16 +216,20 @@ const Auth = {
         });
 
         // Session timeout buttons
-        document.getElementById('btn-session-extend').addEventListener('click', () => SessionTimer.reset());
-        document.getElementById('btn-session-signout').addEventListener('click', async () => {
+        const sessionExtendBtn = document.getElementById('btn-session-extend');
+        const sessionSignoutBtn = document.getElementById('btn-session-signout');
+        if (sessionExtendBtn) sessionExtendBtn.addEventListener('click', () => SessionTimer.reset());
+        if (sessionSignoutBtn) sessionSignoutBtn.addEventListener('click', async () => {
             SessionTimer.stop();
             await auth.signOut();
             location.reload();
         });
 
         // Self-service onboarding
-        document.getElementById('btn-onboard-create').addEventListener('click', () => this._selfServiceOnboard());
-        document.getElementById('onboard-org-name').addEventListener('keydown', (e) => {
+        const onboardBtn = document.getElementById('btn-onboard-create');
+        const onboardInput = document.getElementById('onboard-org-name');
+        if (onboardBtn) onboardBtn.addEventListener('click', () => this._selfServiceOnboard());
+        if (onboardInput) onboardInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') this._selfServiceOnboard();
         });
 
