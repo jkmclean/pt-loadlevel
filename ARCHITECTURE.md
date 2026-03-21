@@ -9,15 +9,17 @@ LoadLevel is a single-page app (SPA) with no build step — vanilla HTML/CSS/JS 
 ```
 index.html
   ├── styles.css          (all styling)
-  ├── db.js               (loaded first — Firestore data layer)
+  ├── logger.js           (loaded first — logging & observability)
+  │   └── Logger          — structured logging, ring buffer, global error handlers
+  ├── db.js               (loaded second — Firestore data layer)
   │   ├── FirestoreStore   — org-scoped CRUD with real-time listeners
   │   ├── UserManager      — per-org role management
   │   └── _getSampleSurveys() — 27 IQMH sample surveys factory
-  ├── auth.js             (loaded second — Firebase init + auth)
+  ├── auth.js             (loaded third — Firebase init + auth)
   │   ├── firebase config + init
   │   ├── Roles            — permission check functions
   │   └── Auth             — sign-in flow, org selection, role resolution
-  ├── app.js              (loaded third — Store + Scoring)
+  ├── app.js              (loaded fourth — Store + Scoring)
   │   ├── Store            — thin async wrapper around FirestoreStore
   │   ├── CATEGORIES       — 6 scoring dimension names
   │   └── Scoring          — pure scoring math (no side effects)
@@ -83,8 +85,22 @@ Final score = weighted sum of all 6 dimensions (weights configurable via Setting
 
 ## Key Design Decisions
 
-1. **No framework** — Chosen for simplicity and zero build step. The app fits in 6 files.
+1. **No framework** — Chosen for simplicity and zero build step. The app fits in 7 files.
 2. **Firestore over Realtime DB** — Needed structured queries and subcollections for multi-tenancy.
 3. **Client-side role enforcement** — Roles are checked in UI JS. Firestore rules provide auth-level security. A future improvement would be Cloud Functions for server-side role enforcement in security rules.
 4. **Real-time sync** — `onSnapshot` was chosen over polling so multiple users editing simultaneously see changes instantly.
 5. **Assignments as a single doc** — The survey→staff mapping is stored as one Firestore doc rather than individual docs, since it's always read/written as a whole and keeps costs down.
+6. **Client-side logging** — `Logger` uses an in-memory ring buffer (last 200 entries) rather than shipping logs to a backend. Sufficient for a small-team app; can be extended to write to Firestore or an external service later.
+
+## Logging & Observability
+
+`logger.js` is loaded before all other application scripts and provides:
+
+- **Structured log entries** — Each entry has `{ timestamp, level, category, message, data, error, user, orgId }`
+- **4 log levels** — `DEBUG`, `INFO`, `WARN`, `ERROR` with configurable minimum (default: `INFO`)
+- **Global error handlers** — `window.onerror` and `unhandledrejection` catch uncaught errors
+- **Ring buffer** — Last 200 entries accessible via `Logger.getRecentLogs()` in the dev console
+- **Performance timing** — `Logger.time()` / `Logger.timeEnd()` for measuring Firestore operations
+- **Context injection** — Current user email and org ID are attached to every log entry once known
+
+Categories used: `init`, `auth`, `db`, `ui`, `perf`, `global`

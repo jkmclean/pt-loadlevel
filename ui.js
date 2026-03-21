@@ -150,14 +150,14 @@ function openStaffModal(id) {
         try {
             if (id) await Store.updateStaff(id, { name, role }); else await Store.addStaff({ name, role });
             Modal.close(); showToast(id ? 'Staff updated' : 'Staff added', 'success');
-        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+        } catch (err) { Logger.error('ui', 'Staff save failed', { id }, err); showToast('Error: ' + err.message, 'error'); }
     });
 }
 
 async function deleteStaff(id) {
     const s = Store.staff.find(x => x.id === id);
     if (confirm(`Remove ${s.name}? Their survey assignments will be unassigned.`)) {
-        try { await Store.removeStaff(id); showToast('Staff removed', 'info'); } catch (err) { showToast('Error: ' + err.message, 'error'); }
+        try { await Store.removeStaff(id); showToast('Staff removed', 'info'); } catch (err) { Logger.error('ui', 'Staff delete failed', { id }, err); showToast('Error: ' + err.message, 'error'); }
     }
 }
 
@@ -233,14 +233,14 @@ function openSurveyModal(id) {
         try {
             if (id) await Store.updateSurvey(id, data); else await Store.addSurvey(data);
             Modal.close(); showToast(id ? 'Survey updated' : 'Survey added', 'success');
-        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+        } catch (err) { Logger.error('ui', 'Survey save failed', { id }, err); showToast('Error: ' + err.message, 'error'); }
     });
 }
 
 async function deleteSurvey(id) {
     const s = Store.surveys.find(x => x.id === id);
     if (confirm(`Delete survey "${s.name}"?`)) {
-        try { await Store.removeSurvey(id); showToast('Survey deleted', 'info'); } catch (err) { showToast('Error: ' + err.message, 'error'); }
+        try { await Store.removeSurvey(id); showToast('Survey deleted', 'info'); } catch (err) { Logger.error('ui', 'Survey delete failed', { id }, err); showToast('Error: ' + err.message, 'error'); }
     }
 }
 
@@ -269,7 +269,7 @@ async function assignSurvey(surveyId, staffId) {
         await Store.assign(surveyId, staffId || null);
         renderWorkloadPreview();
         showToast('Assignment updated', 'success');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    } catch (err) { Logger.error('ui', 'Assignment update failed', { surveyId, staffId }, err); showToast('Error: ' + err.message, 'error'); }
 }
 
 function renderWorkloadPreview() {
@@ -486,7 +486,7 @@ async function renderOrgManagement() {
             renderOrgManagement();
             renderOrgPicker();
             showToast(`Organization "${name}" created`, 'success');
-        } catch (err) { showToast('Error: ' + err.message, 'error'); }
+        } catch (err) { Logger.error('ui', 'Org create failed', { name }, err); showToast('Error: ' + err.message, 'error'); }
     };
 }
 
@@ -497,7 +497,7 @@ async function deleteOrg(orgId, name) {
         renderOrgManagement();
         renderOrgPicker();
         showToast(`Organization "${name}" deleted`, 'info');
-    } catch (err) { showToast('Error: ' + err.message, 'error'); }
+    } catch (err) { Logger.error('ui', 'Org delete failed', { orgId, name }, err); showToast('Error: ' + err.message, 'error'); }
 }
 
 // ===== User Management (Per-Org) =====
@@ -536,6 +536,7 @@ async function addAuthorizedUser() {
         renderUserManagement();
         showToast(`${email} added as ${Roles.LABELS[role]}`, 'success');
     } catch (err) {
+        Logger.error('ui', 'Add user failed', { email, role }, err);
         showToast(err.message, 'error');
     }
 }
@@ -547,6 +548,7 @@ async function removeAuthorizedUser(email) {
         renderUserManagement();
         showToast(`${email} removed`, 'info');
     } catch (err) {
+        Logger.error('ui', 'Remove user failed', { email }, err);
         showToast('Failed to remove user: ' + err.message, 'error');
     }
 }
@@ -557,6 +559,7 @@ async function changeUserRole(email, newRole) {
         renderUserManagement();
         showToast(`Role updated to ${Roles.LABELS[newRole]}`, 'success');
     } catch (err) {
+        Logger.error('ui', 'Role change failed', { email, newRole }, err);
         showToast('Failed to update role: ' + err.message, 'error');
     }
 }
@@ -581,7 +584,7 @@ function initSettings() {
     document.getElementById('import-file-input').onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
-        reader.onload = async (ev) => { try { await Store.importJSON(ev.target.result); showToast('Data imported', 'success'); renderDashboard(); } catch (err) { showToast('Invalid JSON', 'error'); } };
+        reader.onload = async (ev) => { try { await Store.importJSON(ev.target.result); showToast('Data imported', 'success'); renderDashboard(); } catch (err) { Logger.error('ui', 'Data import failed', null, err); showToast('Invalid JSON', 'error'); } };
         reader.readAsText(file);
     };
     document.getElementById('btn-clear-data').onclick = async () => { if (confirm('Clear ALL data in this organization?')) { await Store.clearAll(); showToast('Data cleared', 'info'); } };

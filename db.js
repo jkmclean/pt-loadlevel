@@ -20,6 +20,7 @@ const FirestoreStore = {
     // ===== Organization Management =====
 
     async createOrg(name, adminEmail) {
+        Logger.info('db', 'Creating organization', { name, adminEmail });
         const docRef = await db.collection('organizations').add({
             name,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
@@ -29,6 +30,7 @@ const FirestoreStore = {
         await db.collection('organizations').doc(docRef.id)
             .collection('settings').doc('weights')
             .set(this.defaultWeights());
+        Logger.info('db', 'Organization created', { orgId: docRef.id, name });
         return docRef.id;
     },
 
@@ -44,6 +46,7 @@ const FirestoreStore = {
     },
 
     async deleteOrg(orgId) {
+        Logger.warn('db', 'Deleting organization and all data', { orgId });
         // Delete subcollections first
         const collections = ['surveys', 'staff', 'assignments'];
         for (const col of collections) {
@@ -56,6 +59,7 @@ const FirestoreStore = {
         await db.collection('organizations').doc(orgId).collection('settings').doc('weights').delete().catch(() => {});
         // Delete org doc
         await db.collection('organizations').doc(orgId).delete();
+        Logger.info('db', 'Organization deleted', { orgId });
     },
 
     // ===== Load Organization (with real-time listeners) =====
@@ -68,6 +72,7 @@ const FirestoreStore = {
         this._cache = { surveys: [], staff: [], assignments: {}, weights: this.defaultWeights() };
 
         const orgRef = db.collection('organizations').doc(orgId);
+        Logger.time('loadOrg:' + orgId);
 
         // Real-time: Surveys
         this._listeners.push(
@@ -75,6 +80,8 @@ const FirestoreStore = {
                 this._cache.surveys = [];
                 snap.forEach(doc => this._cache.surveys.push({ id: doc.id, ...doc.data() }));
                 if (this._onUpdate) this._onUpdate('surveys');
+            }, err => {
+                Logger.error('db', 'Surveys listener failed', { orgId }, err);
             })
         );
 
@@ -84,6 +91,8 @@ const FirestoreStore = {
                 this._cache.staff = [];
                 snap.forEach(doc => this._cache.staff.push({ id: doc.id, ...doc.data() }));
                 if (this._onUpdate) this._onUpdate('staff');
+            }, err => {
+                Logger.error('db', 'Staff listener failed', { orgId }, err);
             })
         );
 
@@ -92,6 +101,8 @@ const FirestoreStore = {
             orgRef.collection('settings').doc('assignments').onSnapshot(doc => {
                 this._cache.assignments = doc.exists ? doc.data() : {};
                 if (this._onUpdate) this._onUpdate('assignments');
+            }, err => {
+                Logger.error('db', 'Assignments listener failed', { orgId }, err);
             })
         );
 
@@ -100,6 +111,8 @@ const FirestoreStore = {
             orgRef.collection('settings').doc('weights').onSnapshot(doc => {
                 this._cache.weights = doc.exists ? doc.data() : this.defaultWeights();
                 if (this._onUpdate) this._onUpdate('weights');
+            }, err => {
+                Logger.error('db', 'Weights listener failed', { orgId }, err);
             })
         );
 
@@ -110,6 +123,7 @@ const FirestoreStore = {
             orgRef.collection('settings').doc('assignments').get(),
             orgRef.collection('settings').doc('weights').get()
         ]);
+        Logger.timeEnd('loadOrg:' + orgId);
     },
 
     unsubscribe() {
@@ -196,6 +210,7 @@ const FirestoreStore = {
 
     async clearAllData() {
         if (!this._orgId) throw new Error('No org loaded');
+        Logger.warn('db', 'Clearing all org data', { orgId: this._orgId });
         const orgRef = db.collection('organizations').doc(this._orgId);
         // Delete all surveys
         const surveySnap = await orgRef.collection('surveys').get();
@@ -276,6 +291,7 @@ const FirestoreStore = {
     },
 
     async importJSON(json) {
+        Logger.info('db', 'Importing data from JSON', { orgId: this._orgId });
         const data = JSON.parse(json);
         await this.clearAllData();
         const orgRef = db.collection('organizations').doc(this._orgId);
@@ -400,7 +416,7 @@ const UserManager = {
                 lastUpdated: new Date().toISOString()
             }, { merge: true });
             this._isSuperAdmin = true;
-            console.log('Seeded super admin:', lower);
+            Logger.info('auth', 'Seeded first super admin', { email: lower });
         }
     },
 

@@ -56,3 +56,4 @@
 | **BR-U3** | All user-facing errors must show a toast notification, not a console error |
 | **BR-U4** | The org picker only appears when the user has access to 2+ organizations |
 | **BR-U5** | Survey type badges use consistent colors: Quant=blue, Qual=purple, Mixed=amber |
+| **BR-U6** | All catch blocks must log errors via `Logger.error()` in addition to showing toast messages |
