@@ -59,20 +59,25 @@ const FirestoreStore = {
 
     async getPlatformStats() {
         const orgs = await this.listOrgs();
+        const allUsers = await db.collection('users').get().catch(() => ({ docs: [] }));
         const stats = { totalOrgs: orgs.length, totalUsers: 0, totalSurveys: 0, totalStaff: 0, orgs: [] };
         for (const org of orgs) {
             const [surveysSnap, staffSnap] = await Promise.all([
                 db.collection('organizations').doc(org.id).collection('surveys').get(),
                 db.collection('organizations').doc(org.id).collection('staff').get()
             ]);
-            // Count users assigned to this org
-            const usersSnap = await db.collection('users').where('organizations', 'array-contains-any', [
-                { orgId: org.id, role: 'admin' }, { orgId: org.id, role: 'editor' }, { orgId: org.id, role: 'viewer' }
-            ]).get().catch(() => ({ size: 0 }));
+            // Count users by checking their organizations array
+            let userCount = 0;
+            allUsers.docs.forEach(doc => {
+                const data = doc.data();
+                if (data.organizations && data.organizations.some(o => o.orgId === org.id)) {
+                    userCount++;
+                }
+            });
             const orgStats = {
                 id: org.id, name: org.name,
                 surveys: surveysSnap.size, staff: staffSnap.size,
-                users: usersSnap.size || 0,
+                users: userCount,
                 createdAt: org.createdAt
             };
             stats.totalSurveys += orgStats.surveys;
