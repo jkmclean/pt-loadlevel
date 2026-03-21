@@ -251,12 +251,22 @@ const Auth = {
             Logger.setUser(email);
             Logger.info('auth', 'Sign-in detected', { email, provider: user.providerData?.[0]?.providerId });
 
-            // Seed super admin if first user ever
-            await UserManager.seedSuperAdmin(email);
+            // Seed super admin if first user ever (non-fatal if fails)
+            try {
+                await UserManager.seedSuperAdmin(email);
+                console.log('[auth] seedSuperAdmin OK');
+            } catch (e) { console.warn('[auth] seedSuperAdmin failed:', e.message); }
 
             // Load user profile
-            await UserManager.loadUser(email);
-            await UserManager.ensureUserDoc(email);
+            try {
+                await UserManager.loadUser(email);
+                console.log('[auth] loadUser OK, isSuperAdmin:', UserManager._isSuperAdmin);
+            } catch (e) { console.warn('[auth] loadUser failed:', e.message); }
+
+            try {
+                await UserManager.ensureUserDoc(email);
+                console.log('[auth] ensureUserDoc OK');
+            } catch (e) { console.warn('[auth] ensureUserDoc failed:', e.message); }
 
             // Super admins always get in
             if (UserManager._isSuperAdmin) {
