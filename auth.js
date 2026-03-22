@@ -1,7 +1,7 @@
 // ===== Firebase Configuration =====
 const firebaseConfig = {
     apiKey: "AIzaSyAxE0bCj6Jm0lvi4vbJdeVerfrQO72BP9Y",
-    authDomain: "pt-loadlevel.firebaseapp.com",
+    authDomain: "pt-loadlevel.web.app",
     projectId: "pt-loadlevel",
     storageBucket: "pt-loadlevel.firebasestorage.app",
     messagingSenderId: "96502262038",
@@ -10,9 +10,6 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
-// Use SESSION persistence — Edge Tracking Prevention blocks IndexedDB for CDN scripts,
-// which breaks the default LOCAL persistence after redirect-based sign-in.
-auth.setPersistence(firebase.auth.Auth.Persistence.SESSION);
 const db = firebase.firestore();
 
 // ===== Role Definitions =====
