@@ -1,7 +1,7 @@
 // ===== Firebase Configuration =====
 const firebaseConfig = {
     apiKey: "AIzaSyAxE0bCj6Jm0lvi4vbJdeVerfrQO72BP9Y",
-    authDomain: "pt-loadlevel.web.app",
+    authDomain: "pt-loadlevel.firebaseapp.com",
     projectId: "pt-loadlevel",
     storageBucket: "pt-loadlevel.firebasestorage.app",
     messagingSenderId: "96502262038",
