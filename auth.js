@@ -264,14 +264,21 @@ const Auth = {
             // Seed super admin if first user ever (non-fatal if fails)
             try {
                 await UserManager.seedSuperAdmin(email);
-                console.log('[auth] seedSuperAdmin OK');
             } catch (e) { console.warn('[auth] seedSuperAdmin failed:', e.message); }
 
-            // Load user profile
+            // Load user profile + super admin check
             try {
                 await UserManager.loadUser(email);
                 console.log('[auth] loadUser OK, isSuperAdmin:', UserManager._isSuperAdmin);
-            } catch (e) { console.warn('[auth] loadUser failed:', e.message); }
+            } catch (e) {
+                console.warn('[auth] loadUser failed:', e.message);
+                // Fallback: try super admin check independently
+                try {
+                    const saDoc = await db.collection('superAdmins').doc(email).get();
+                    UserManager._isSuperAdmin = saDoc.exists;
+                    console.log('[auth] Fallback super admin check:', UserManager._isSuperAdmin);
+                } catch (e2) { console.warn('[auth] Fallback SA check also failed:', e2.message); }
+            }
 
             try {
                 await UserManager.ensureUserDoc(email);
