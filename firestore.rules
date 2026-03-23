@@ -2,10 +2,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Super admins collection — only super admins can read/write
+    // Super admins collection — authenticated users can read; writes allowed for seeding
     match /superAdmins/{email} {
       allow read: if request.auth != null;
-      allow write: if false; // Managed by seed logic only
+      allow write: if request.auth != null;
     }
 
     // Users collection — authenticated users can read their own doc; admins can read/write all
