@@ -540,17 +540,17 @@ async function addAuthorizedUser() {
         await UserManager.setRoleForOrg(email, Auth._currentOrgId, role);
         const orgName = FirestoreStore._currentOrg?.name || 'our organization';
         const roleName = Roles.LABELS[role] || 'Viewer';
-        const subject = encodeURIComponent(`You've been invited to ${orgName} on LoadLevel`);
-        const body = encodeURIComponent(
-            `Hi,\n\nYou've been added to "${orgName}" as ${roleName} on LoadLevel.\n\n` +
-            `Sign in at: https://pt-loadlevel.web.app\n\n` +
-            `Use Google Sign-In with this email address (${email}).\n\nThanks!`
-        );
-        window.open(`mailto:${email}?subject=${subject}&body=${body}`, '_blank');
+        const invitedBy = Auth.currentUser?.email || 'an administrator';
+        // Queue invitation email via Firestore → Resend
+        try {
+            await FirestoreStore.sendInvitationEmail(email, orgName, roleName, invitedBy);
+        } catch (mailErr) {
+            console.warn('Invitation email failed to queue:', mailErr.message);
+        }
         emailInput.value = '';
         roleSelect.value = 'viewer';
         renderUserManagement();
-        showToast(`${email} added as ${roleName}`, 'success');
+        showToast(`${email} added as ${roleName} — invitation sent`, 'success');
     } catch (err) {
         Logger.error('ui', 'Add user failed', { email, role }, err);
         showToast(err.message, 'error');

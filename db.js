@@ -57,6 +57,28 @@ const FirestoreStore = {
         return doc.exists ? (doc.data().branding || {}) : {};
     },
 
+    async sendInvitationEmail(recipientEmail, orgName, roleName, invitedBy) {
+        await db.collection('mail').add({
+            to: recipientEmail,
+            message: {
+                subject: `You've been invited to ${orgName} on LoadLevel`,
+                html: `
+                    <div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 520px; margin: 0 auto; padding: 32px; background: #1a1d23; color: #e0e0e0; border-radius: 12px;">
+                        <h2 style="color: #818cf8; margin: 0 0 16px;">Welcome to LoadLevel</h2>
+                        <p>You've been invited to <strong style="color: #fff;">${orgName}</strong> as <strong style="color: #818cf8;">${roleName}</strong>.</p>
+                        <p style="margin: 24px 0;">
+                            <a href="https://pt-loadlevel.web.app" style="display: inline-block; padding: 12px 28px; background: #818cf8; color: #fff; text-decoration: none; border-radius: 8px; font-weight: 600;">Sign In to LoadLevel</a>
+                        </p>
+                        <p style="font-size: 0.85rem; color: #999;">Use Google Sign-In with <strong>${recipientEmail}</strong> to get started.</p>
+                        <hr style="border: none; border-top: 1px solid #2a2d35; margin: 24px 0;">
+                        <p style="font-size: 0.8rem; color: #666;">Invited by ${invitedBy}</p>
+                    </div>
+                `
+            }
+        });
+        Logger.info('db', 'Invitation email queued', { to: recipientEmail, orgName, role: roleName });
+    },
+
     async getPlatformStats() {
         const orgs = await this.listOrgs();
         const allUsers = await db.collection('users').get().catch(() => ({ docs: [] }));

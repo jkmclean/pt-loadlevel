@@ -26,6 +26,12 @@ service cloud.firestore {
       }
     }
 
+    // Mail collection — used by Trigger Email extension (Resend)
+    match /mail/{mailId} {
+      allow create: if request.auth != null;
+      allow read, update, delete: if false; // Extension-only
+    }
+
     // Legacy allowedUsers collection (keeping for backward compat during migration)
     match /allowedUsers/{doc} {
       allow read: if request.auth != null;
